@@ -2,6 +2,7 @@
 package enginebus
 
 import (
+	"changeme/internal/business/types/status"
 	"context"
 	"fmt"
 	"io"
@@ -43,7 +44,8 @@ type (
 		UpdateSession(ctx context.Context, session Session) error
 		DeleteSession(ctx context.Context, sessionID uuid.UUID) error
 
-		CreateDocument(ctx context.Context, sessionID uuid.UUID, doc Document) error
+		CreateDocument(ctx context.Context, doc Document) error
+		UpdateDocument(ctx context.Context, doc Document) error
 		AddDocumentChunk(ctx context.Context, documentID uuid.UUID, chunk string, vec Vector) error
 		ListDocuments(ctx context.Context, sessionID uuid.UUID) ([]Document, error)
 		SearchDocuments(ctx context.Context, sessionID uuid.UUID, queryVec []float32) ([]Fragment, error)
@@ -130,12 +132,16 @@ func (e *Engine) Close(ctx context.Context) error {
 	return nil
 }
 
-func (e *Engine) CreateSession(ctx context.Context, name string) (Session, error) {
+func (e *Engine) CreateSession(ctx context.Context, name string, opts ...SessionOption) (Session, error) {
 	session := Session{
 		ID:            uuid.New(),
 		ChatHistory:   []model.D{},
 		BatchSize:     4096,
 		BatchsOverlap: 512,
+	}
+
+	for _, opt := range opts {
+		opt(&session)
 	}
 
 	err := e.store.CreateSession(ctx, session)
@@ -154,27 +160,29 @@ type AddDocumentInput struct {
 	ContentType string
 }
 
-func (e *Engine) AddDocumentText(ctx context.Context, doc AddDocumentInput) error {
-	e.logger.Info("Adding document to engine", "sessionID", doc.SessionID, "name", doc.Name, "path", doc.Path)
+func (e *Engine) AddDocumentText(ctx context.Context, input AddDocumentInput) error {
+	e.logger.Info("Adding document to engine", "sessionID", input.SessionID, "name", input.Name, "path", input.Path)
 
-	s, err := e.store.GetSession(ctx, doc.SessionID)
+	s, err := e.store.GetSession(ctx, input.SessionID)
 	if err != nil {
 		return fmt.Errorf("getting session: %w", err)
 	}
 
 	documentID := uuid.New()
+	doc := Document{
+		ID:          documentID,
+		Name:        input.Name,
+		Path:        input.Path,
+		ContentType: input.ContentType,
+		Status:      status.Processing,
+	}
 
-	err = e.store.CreateDocument(ctx, doc.SessionID, Document{
-		ID:          documentID.String(),
-		Name:        doc.Name,
-		Path:        doc.Path,
-		ContentType: doc.ContentType,
-	})
+	err = e.store.CreateDocument(ctx, doc)
 	if err != nil {
 		return fmt.Errorf("creating document: %w", err)
 	}
 
-	textBytes := []byte(doc.Text)
+	textBytes := []byte(input.Text)
 	chunkIndex := 0
 	var previousChunk []byte
 
@@ -220,6 +228,9 @@ func (e *Engine) AddDocumentText(ctx context.Context, doc AddDocumentInput) erro
 		previousChunk = currentChunk
 		chunkIndex++
 	}
+
+	e.logger.Info("Finished processing document", "sessionID", doc.SessionID, "documentID", documentID, "chunkCount", chunkIndex)
+	e.store.UpdateDocument(ctx, doc)
 
 	return nil
 }

@@ -7,15 +7,12 @@ import (
 )
 
 type Document struct {
-	ID          string
+	ID          uuid.UUID
+	SessionID   uuid.UUID
 	Name        string
 	Path        string
 	ContentType string
 	Status      status.Status
-
-	// Similarity float64
-	// Text       string
-	// Embedding  []float64
 }
 
 type Fragment struct {

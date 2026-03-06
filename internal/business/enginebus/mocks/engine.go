@@ -57,17 +57,17 @@ func (mr *MockStoreMockRecorder) AddDocumentChunk(ctx, documentID, chunk, vec an
 }
 
 // CreateDocument mocks base method.
-func (m *MockStore) CreateDocument(ctx context.Context, sessionID uuid.UUID, doc enginebus.Document) error {
+func (m *MockStore) CreateDocument(ctx context.Context, doc enginebus.Document) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CreateDocument", ctx, sessionID, doc)
+	ret := m.ctrl.Call(m, "CreateDocument", ctx, doc)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // CreateDocument indicates an expected call of CreateDocument.
-func (mr *MockStoreMockRecorder) CreateDocument(ctx, sessionID, doc any) *gomock.Call {
+func (mr *MockStoreMockRecorder) CreateDocument(ctx, doc any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateDocument", reflect.TypeOf((*MockStore)(nil).CreateDocument), ctx, sessionID, doc)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateDocument", reflect.TypeOf((*MockStore)(nil).CreateDocument), ctx, doc)
 }
 
 // CreateSession mocks base method.
@@ -141,6 +141,20 @@ func (m *MockStore) SearchDocuments(ctx context.Context, sessionID uuid.UUID, qu
 func (mr *MockStoreMockRecorder) SearchDocuments(ctx, sessionID, queryVec any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SearchDocuments", reflect.TypeOf((*MockStore)(nil).SearchDocuments), ctx, sessionID, queryVec)
+}
+
+// UpdateDocument mocks base method.
+func (m *MockStore) UpdateDocument(ctx context.Context, doc enginebus.Document) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateDocument", ctx, doc)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateDocument indicates an expected call of UpdateDocument.
+func (mr *MockStoreMockRecorder) UpdateDocument(ctx, doc any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateDocument", reflect.TypeOf((*MockStore)(nil).UpdateDocument), ctx, doc)
 }
 
 // UpdateSession mocks base method.
