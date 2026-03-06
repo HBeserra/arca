@@ -1,44 +1,63 @@
 package main
 
 import (
+	"context"
 	"embed"
 	_ "embed"
 	"log"
 	"time"
 
+	"changeme/internal/engine"
+	"changeme/services"
+
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
-
-// Wails uses Go's `embed` package to embed the frontend files into the binary.
-// Any files in the frontend/dist folder will be embedded into the binary and
-// made available to the frontend.
-// See https://pkg.go.dev/embed for more information.
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
+const (
+	embedModelURL  = "https://huggingface.co/ggml-org/embeddinggemma-300m-qat-q8_0-GGUF/resolve/main/embeddinggemma-300m-qat-Q8_0.gguf"
+	rerankModelURL = "https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF/resolve/main/bge-reranker-v2-m3-Q8_0.gguf"
+	chatModelURL   = "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf"
+)
+
 func init() {
-	// Register a custom event whose associated data type is string.
-	// This is not required, but the binding generator will pick up registered events
-	// and provide a strongly typed JS/TS API for them.
-	application.RegisterEvent[string]("time")
+	application.RegisterEvent[services.IndexProgressEvent]("index:progress")
+	application.RegisterEvent[services.IndexCompleteEvent]("index:complete")
+	application.RegisterEvent[services.IndexErrorEvent]("index:error")
+	application.RegisterEvent[services.ChatTokenEvent]("chat:token")
+	application.RegisterEvent[services.ChatCitationEvent]("chat:citation")
+	application.RegisterEvent[services.ChatDoneEvent]("chat:done")
 }
 
-// main function serves as the application's entry point. It initializes the application, creates a window,
-// and starts a goroutine that emits a time-based event every second. It subsequently runs the application and
-// logs any error that might occur.
 func main() {
+	eng := engine.New(embedModelURL, rerankModelURL, chatModelURL)
 
-	// Create a new Wails application by providing the necessary options.
-	// Variables 'Name' and 'Description' are for application metadata.
-	// 'Assets' configures the asset server with the 'FS' variable pointing to the frontend files.
-	// 'Bind' is a list of Go struct instances. The frontend has access to the methods of these instances.
-	// 'Mac' options tailor the application when running an macOS.
+	// Initialise Kronk libs and catalog in the background (downloads on first run).
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+
+		if err := eng.Init(ctx); err != nil {
+			log.Printf("engine init: %v", err)
+		}
+	}()
+
+	idxSvc := services.NewIndexService(eng)
+	qrySvc := services.NewQueryService(eng, idxSvc)
+
+	// Load persisted sessions.
+	if err := idxSvc.LoadAll(); err != nil {
+		log.Printf("session load: %v", err)
+	}
+
 	app := application.New(application.Options{
-		Name:        "kronk-gui",
-		Description: "A demo of using raw HTML & CSS",
+		Name:        "Arca",
+		Description: "RAG-powered knowledge base and chat",
 		Services: []application.Service{
-			application.NewService(&GreetService{}),
+			application.NewService(idxSvc),
+			application.NewService(qrySvc),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -48,13 +67,8 @@ func main() {
 		},
 	})
 
-	// Create a new window with the necessary options.
-	// 'Title' is the title of the window.
-	// 'Mac' options tailor the window when running on macOS.
-	// 'BackgroundColour' is the background colour of the window.
-	// 'URL' is the URL that will be loaded into the webview.
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "Window 1",
+		Title: "Arca",
 		Mac: application.MacWindow{
 			InvisibleTitleBarHeight: 50,
 			Backdrop:                application.MacBackdropTranslucent,
@@ -64,21 +78,7 @@ func main() {
 		URL:              "/",
 	})
 
-	// Create a goroutine that emits an event containing the current time every second.
-	// The frontend can listen to this event and update the UI accordingly.
-	go func() {
-		for {
-			now := time.Now().Format(time.RFC1123)
-			app.Event.Emit("time", now)
-			time.Sleep(time.Second)
-		}
-	}()
-
-	// Run the application. This blocks until the application has been exited.
-	err := app.Run()
-
-	// If an error occurred while running the application, log it and exit.
-	if err != nil {
+	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
 }

@@ -1,69 +1,86 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ChatPanel } from "@/components/ChatPanel";
 import { KnowledgeBasePanel } from "@/components/KnowledgeBasePanel";
 import { ConfigPanel } from "@/components/ConfigPanel";
 import { StatusBar } from "@/components/StatusBar";
-import { mockMessages, mockDocuments, defaultConfig, activeSourceIds } from "@/lib/mock-data";
-import type { Message, AppConfig } from "@/lib/types";
+import { defaultConfig } from "@/lib/mock-data";
+import type { Message, AppConfig, Session } from "@/lib/types";
+import * as IndexService from "../bindings/changeme/services/indexservice";
 
 export default function App() {
-  const [messages, setMessages] = useState<Message[]>(mockMessages);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [activeSessionID, setActiveSessionID] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [config, setConfig] = useState<AppConfig>(defaultConfig);
 
-  function handleSend(content: string) {
-    const userMessage: Message = {
-      id: String(Date.now()),
-      role: "user",
-      content,
-      timestamp: new Date(),
-    };
-
-    const streamingMessage: Message = {
-      id: String(Date.now() + 1),
-      role: "assistant",
-      content: "",
-      isStreaming: true,
-      timestamp: new Date(),
-    };
-
-    setMessages((prev) => [...prev, userMessage, streamingMessage]);
-    setIsStreaming(true);
-
-    const response =
-      "This is a mock response. In a real implementation, this would stream content from the backend via Wails bindings, retrieving relevant chunks from the knowledge base and generating a response using the configured model.";
-
-    let i = 0;
-    const interval = setInterval(() => {
-      i += 3;
-      const chunk = response.slice(0, i);
-      const done = i >= response.length;
-
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.isStreaming ? { ...m, content: chunk, isStreaming: !done } : m
-        )
-      );
-
-      if (done) {
-        clearInterval(interval);
-        setIsStreaming(false);
+  // Load persisted sessions on mount.
+  useEffect(() => {
+    IndexService.ListSessions().then((list) => {
+      if (list && list.length > 0) {
+        const typed = list.filter(Boolean) as unknown as Session[];
+        setSessions(typed);
+        setActiveSessionID(typed[0].id);
       }
-    }, 30);
+    });
+  }, []);
+
+  const activeSession = sessions.find((s) => s.id === activeSessionID) ?? null;
+
+  const queryConfig = {
+    topK: config.rag.topK,
+    similarityThreshold: config.rag.similarityThreshold,
+    useReranker: config.rag.useReranker,
+    systemPrompt: config.model.systemPrompt,
+    maxTokens: config.model.maxTokens,
+  };
+
+  function handleSessionCreated(sess: Session) {
+    setSessions((prev) => [...prev, sess]);
+  }
+
+  function handleSessionDeleted(id: string) {
+    setSessions((prev) => prev.filter((s) => s.id !== id));
+    if (activeSessionID === id) {
+      setActiveSessionID(sessions.find((s) => s.id !== id)?.id ?? null);
+      setMessages([]);
+    }
+  }
+
+  function handleSessionUpdated(sess: Session) {
+    setSessions((prev) => prev.map((s) => (s.id === sess.id ? sess : s)));
+  }
+
+  function handleSessionSelect(id: string) {
+    setActiveSessionID(id);
+    setMessages([]); // clear chat when switching sessions
   }
 
   return (
     <TooltipProvider>
       <div className="flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground">
-        {/* Three-column layout — headers serve as the drag region */}
         <div className="flex flex-1 overflow-hidden min-h-0">
           <div className="w-64 flex-shrink-0 border-r flex flex-col overflow-hidden">
-            <KnowledgeBasePanel documents={mockDocuments} activeSourceIds={activeSourceIds} />
+            <KnowledgeBasePanel
+              sessions={sessions}
+              activeSessionID={activeSessionID}
+              onSessionSelect={handleSessionSelect}
+              onSessionCreated={handleSessionCreated}
+              onSessionDeleted={handleSessionDeleted}
+              onSessionUpdated={handleSessionUpdated}
+            />
           </div>
 
           <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-            <ChatPanel messages={messages} onSend={handleSend} isStreaming={isStreaming} />
+            <ChatPanel
+              messages={messages}
+              setMessages={setMessages}
+              isStreaming={isStreaming}
+              setIsStreaming={setIsStreaming}
+              activeSession={activeSession}
+              queryConfig={queryConfig}
+            />
           </div>
 
           <div className="w-72 flex-shrink-0 border-l flex flex-col overflow-hidden">
@@ -71,7 +88,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Status bar */}
         <StatusBar isRunning={isStreaming} model={config.model.model} />
       </div>
     </TooltipProvider>

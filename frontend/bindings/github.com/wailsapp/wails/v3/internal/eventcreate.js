@@ -6,9 +6,27 @@
 // @ts-ignore: Unused imports
 import { Create as $Create } from "@wailsio/runtime";
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as services$0 from "../../../../../changeme/services/models.js";
+
 function configure() {
     Object.freeze(Object.assign($Create.Events, {
+        "chat:citation": $$createType0,
+        "chat:done": $$createType1,
+        "chat:token": $$createType2,
+        "index:complete": $$createType3,
+        "index:error": $$createType4,
+        "index:progress": $$createType5,
     }));
 }
+
+// Private type creation functions
+const $$createType0 = services$0.ChatCitationEvent.createFrom;
+const $$createType1 = services$0.ChatDoneEvent.createFrom;
+const $$createType2 = services$0.ChatTokenEvent.createFrom;
+const $$createType3 = services$0.IndexCompleteEvent.createFrom;
+const $$createType4 = services$0.IndexErrorEvent.createFrom;
+const $$createType5 = services$0.IndexProgressEvent.createFrom;
 
 configure();
