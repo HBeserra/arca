@@ -18,33 +18,15 @@ export interface Message {
   timestamp: Date;
 }
 
-export type DocumentStatus = "indexed" | "processing" | "error";
+export type DocumentStatus = "waiting" | "processing" | "completed" | "error";
 
-export interface KBDocument {
-  id: string;
-  name: string;
-  status: DocumentStatus;
-  size: string;
-  chunks: number;
-  uploadedAt: Date;
-}
-
-// Session types (matching Wails bindings snake_case)
+// Session types (matching Wails bindings / SessionInfo / DocumentInfo)
 export interface SessionDocument {
   id: string;
-  path: string;
   name: string;
-  ext: string;
-  size: number;
+  path: string;
+  content_type: string;
   status: DocumentStatus;
-  chunk_count: number;
-  summary: string;
-}
-
-export interface SessionGroup {
-  id: string;
-  label: string;
-  doc_ids: string[];
 }
 
 export interface Session {
@@ -52,7 +34,6 @@ export interface Session {
   name: string;
   created_at: string | null;
   documents: SessionDocument[];
-  groups: SessionGroup[];
 }
 
 // Event payload types

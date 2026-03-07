@@ -3,23 +3,24 @@ package services
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sync"
+	"time"
 
-	"changeme/internal/engine"
-	"changeme/internal/session"
-	"changeme/internal/store"
+	"changeme/internal/business/enginebus"
 
+	"github.com/google/uuid"
 	"github.com/ardanlabs/kronk/sdk/kronk/model"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // QueryConfig carries RAG and model parameters from the frontend.
 type QueryConfig struct {
-	TopK               int     `json:"topK"`
+	TopK                int     `json:"topK"`
 	SimilarityThreshold float32 `json:"similarityThreshold"`
-	UseReranker        bool    `json:"useReranker"`
-	SystemPrompt       string  `json:"systemPrompt"`
-	MaxTokens          int     `json:"maxTokens"`
+	UseReranker         bool    `json:"useReranker"`
+	SystemPrompt        string  `json:"systemPrompt"`
+	MaxTokens           int     `json:"maxTokens"`
 }
 
 // HistoryMessage is a single chat turn stored per session.
@@ -55,19 +56,23 @@ type ChatDoneEvent struct {
 	SessionID string `json:"sessionID"`
 }
 
-// QueryService is the Wails-facing service for RAG-augmented chat.
-type QueryService struct {
-	eng      *engine.Engine
-	idxSvc   *IndexService
-	mu       sync.Mutex
-	history  map[string][]HistoryMessage
+// ChatErrorEvent is emitted when the query pipeline fails.
+type ChatErrorEvent struct {
+	SessionID string `json:"sessionID"`
+	Error     string `json:"error"`
 }
 
-// NewQueryService creates a QueryService backed by the given engine and index service.
-func NewQueryService(eng *engine.Engine, idxSvc *IndexService) *QueryService {
+// QueryService is the Wails-facing service for RAG-augmented chat.
+type QueryService struct {
+	eng     *enginebus.Engine
+	mu      sync.Mutex
+	history map[string][]HistoryMessage
+}
+
+// NewQueryService creates a QueryService backed by the given engine.
+func NewQueryService(eng *enginebus.Engine) *QueryService {
 	return &QueryService{
 		eng:     eng,
-		idxSvc:  idxSvc,
 		history: make(map[string][]HistoryMessage),
 	}
 }
@@ -76,9 +81,9 @@ func NewQueryService(eng *engine.Engine, idxSvc *IndexService) *QueryService {
 func (q *QueryService) Query(sessionID, userMessage string, cfg QueryConfig) error {
 	go func() {
 		if err := q.query(sessionID, userMessage, cfg); err != nil {
-			application.Get().Event.Emit("chat:error", map[string]string{
-				"sessionID": sessionID,
-				"error":     err.Error(),
+			application.Get().Event.Emit("chat:error", ChatErrorEvent{
+				SessionID: sessionID,
+				Error:     err.Error(),
 			})
 		}
 	}()
@@ -87,82 +92,56 @@ func (q *QueryService) Query(sessionID, userMessage string, cfg QueryConfig) err
 }
 
 func (q *QueryService) query(sessionID, userMessage string, cfg QueryConfig) error {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
 	app := application.Get()
 
-	// Get the store for this session.
-	q.idxSvc.mu.RLock()
-	st, ok := q.idxSvc.stores[sessionID]
-	sess, sessOK := q.idxSvc.sessions[sessionID]
-	q.idxSvc.mu.RUnlock()
-
-	if !ok || !sessOK {
-		return fmt.Errorf("query: session %s not found", sessionID)
-	}
-
-	// 1. Embed the query.
-	queryEmb, err := q.eng.Embed(ctx, userMessage)
+	sid, err := uuid.Parse(sessionID)
 	if err != nil {
-		return fmt.Errorf("query: embed: %w", err)
+		return fmt.Errorf("query: invalid session id: %w", err)
 	}
 
-	topK := cfg.TopK
-	if topK <= 0 {
-		topK = 5
+	// 1. Retrieve relevant fragments via semantic search.
+	fragments, err := q.eng.SearchDocs(ctx, sid, userMessage)
+	if err != nil {
+		return fmt.Errorf("query: search: %w", err)
 	}
 
-	threshold := cfg.SimilarityThreshold
-	if threshold <= 0 {
-		threshold = 0.3
-	}
-
-	// 2. Vector search.
-	hits := st.Search(queryEmb, topK, threshold)
-
-	// 3. Optionally rerank.
+	// 2. Optionally rerank.
 	var citations []Citation
 
-	if len(hits) > 0 {
-		texts := make([]string, len(hits))
-
-		for i, h := range hits {
-			texts[i] = h.Text
+	if len(fragments) > 0 {
+		texts := make([]string, len(fragments))
+		for i, f := range fragments {
+			texts[i] = f.Text
 		}
 
 		if cfg.UseReranker && len(texts) > 1 {
 			ranked, err := q.eng.Rerank(ctx, userMessage, texts)
 			if err == nil {
-				reorderedHits := make([]store.ScoredChunk, 0, len(ranked))
-
+				reordered := make([]enginebus.Fragment, 0, len(ranked))
 				for _, r := range ranked {
-					if r.Index < len(hits) {
-						h := hits[r.Index]
-						h.Score = float32(r.RelevanceScore)
-						reorderedHits = append(reorderedHits, h)
+					if r.Index < len(fragments) {
+						reordered = append(reordered, fragments[r.Index])
 					}
 				}
-
-				hits = reorderedHits
+				fragments = reordered
 			}
 		}
 
-		docMap := buildDocMap(sess)
-
-		for _, h := range hits {
-			excerpt := h.Text
-
+		for i, f := range fragments {
+			excerpt := f.Text
 			if len(excerpt) > 300 {
 				excerpt = excerpt[:300] + "…"
 			}
 
-			docName := docMap[h.DocumentID]
 			citations = append(citations, Citation{
-				ID:           h.ID,
-				DocumentID:   h.DocumentID,
-				DocumentName: docName,
-				ChunkIndex:   h.Index,
+				ID:           fmt.Sprintf("%s-%d", f.DocumentID.String(), i),
+				DocumentID:   f.DocumentID.String(),
+				DocumentName: filepath.Base(f.Path),
+				ChunkIndex:   i,
 				Excerpt:      excerpt,
-				Score:        h.Score,
+				Score:        float32(f.Similarity),
 			})
 		}
 	}
@@ -173,7 +152,7 @@ func (q *QueryService) query(sessionID, userMessage string, cfg QueryConfig) err
 		Citations: citations,
 	})
 
-	// 4. Build prompt.
+	// 3. Build prompt.
 	systemPrompt := cfg.SystemPrompt
 	if systemPrompt == "" {
 		systemPrompt = "You are a helpful assistant. Answer questions using the provided context. If the context does not contain the answer, say so."
@@ -183,13 +162,11 @@ func (q *QueryService) query(sessionID, userMessage string, cfg QueryConfig) err
 		model.TextMessage(model.RoleSystem, systemPrompt),
 	)
 
-	if len(hits) > 0 {
+	if len(fragments) > 0 {
 		var contextBuilder string
-
-		for i, h := range hits {
-			contextBuilder += fmt.Sprintf("[%d] %s\n\n", i+1, h.Text)
+		for i, f := range fragments {
+			contextBuilder += fmt.Sprintf("[%d] %s\n\n", i+1, f.Text)
 		}
-
 		msgs = append(msgs,
 			model.TextMessage(model.RoleSystem, "Context:\n"+contextBuilder),
 		)
@@ -206,7 +183,7 @@ func (q *QueryService) query(sessionID, userMessage string, cfg QueryConfig) err
 
 	msgs = append(msgs, model.TextMessage(model.RoleUser, userMessage))
 
-	// 5. Stream response.
+	// 4. Stream response.
 	ch, err := q.eng.ChatStream(ctx, msgs)
 	if err != nil {
 		return fmt.Errorf("query: chat stream: %w", err)
@@ -268,15 +245,4 @@ func (q *QueryService) ClearHistory(sessionID string) {
 	defer q.mu.Unlock()
 
 	delete(q.history, sessionID)
-}
-
-// buildDocMap creates a map from documentID to documentName.
-func buildDocMap(sess *session.Session) map[string]string {
-	m := make(map[string]string, len(sess.Documents))
-
-	for _, d := range sess.Documents {
-		m[d.ID] = d.Name
-	}
-
-	return m
 }

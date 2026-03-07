@@ -3,14 +3,13 @@ package services
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
-	"time"
+	"unicode/utf8"
 
-	"changeme/internal/engine"
-	"changeme/internal/grouper"
-	"changeme/internal/indexer"
-	"changeme/internal/session"
-	"changeme/internal/store"
+	"changeme/internal/business/enginebus"
 
 	"github.com/google/uuid"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -37,102 +36,105 @@ type IndexErrorEvent struct {
 	Error     string `json:"error"`
 }
 
+// SessionInfo is the JSON-serialisable view of a session.
+type SessionInfo struct {
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	CreatedAt string         `json:"created_at"`
+	Documents []DocumentInfo `json:"documents"`
+}
+
+// DocumentInfo is the JSON-serialisable view of a document.
+type DocumentInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	ContentType string `json:"content_type"`
+	Status      string `json:"status"`
+}
+
+// supportedExts lists file extensions that can be text-extracted.
+var supportedExts = map[string]bool{
+	".txt": true, ".md": true, ".mdx": true,
+	".go": true, ".py": true, ".js": true, ".ts": true,
+	".jsx": true, ".tsx": true, ".json": true,
+	".yaml": true, ".yml": true, ".toml": true,
+	".csv": true, ".xml": true, ".html": true,
+	".sh": true, ".sql": true, ".rs": true,
+	".java": true, ".c": true, ".cpp": true, ".h": true,
+}
+
 // IndexService is the Wails-facing service for session and ingestion management.
 type IndexService struct {
-	eng      *engine.Engine
-	mu       sync.RWMutex
-	sessions map[string]*session.Session
-	stores   map[string]*store.Store
+	eng *enginebus.Engine
+	mu  sync.RWMutex
 }
 
 // NewIndexService returns a new IndexService.
-func NewIndexService(eng *engine.Engine) *IndexService {
-	return &IndexService{
-		eng:      eng,
-		sessions: make(map[string]*session.Session),
-		stores:   make(map[string]*store.Store),
-	}
-}
-
-// LoadAll restores persisted sessions into memory. Call once at startup.
-func (s *IndexService) LoadAll() error {
-	sessions, err := session.ListSessions()
-	if err != nil {
-		return err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for _, sess := range sessions {
-		s.sessions[sess.ID] = sess
-
-		st, err := store.Load(sess.ID)
-		if err != nil {
-			st = store.New()
-		}
-
-		s.stores[sess.ID] = st
-	}
-
-	return nil
+func NewIndexService(eng *enginebus.Engine) *IndexService {
+	return &IndexService{eng: eng}
 }
 
 // CreateSession creates and persists a new named session.
-func (s *IndexService) CreateSession(name string) (*session.Session, error) {
-	sess := &session.Session{
-		ID:        uuid.New().String(),
-		Name:      name,
-		CreatedAt: time.Now(),
-	}
+func (s *IndexService) CreateSession(name string) (*SessionInfo, error) {
+	ctx := context.Background()
 
-	if err := sess.Save(); err != nil {
+	sess, err := s.eng.CreateSession(ctx, name)
+	if err != nil {
 		return nil, fmt.Errorf("index: create session: %w", err)
 	}
 
-	s.mu.Lock()
-	s.sessions[sess.ID] = sess
-	s.stores[sess.ID] = store.New()
-	s.mu.Unlock()
-
-	return sess, nil
+	info := sessionToInfo(sess, nil)
+	return &info, nil
 }
 
-// ListSessions returns all in-memory sessions.
-func (s *IndexService) ListSessions() []*session.Session {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+// ListSessions returns all persisted sessions.
+func (s *IndexService) ListSessions() ([]SessionInfo, error) {
+	ctx := context.Background()
 
-	out := make([]*session.Session, 0, len(s.sessions))
-
-	for _, sess := range s.sessions {
-		out = append(out, sess)
+	sessions, err := s.eng.ListSessions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("index: list sessions: %w", err)
 	}
 
-	return out
-}
-
-// GetSession returns a single session by ID.
-func (s *IndexService) GetSession(id string) (*session.Session, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	sess, ok := s.sessions[id]
-	if !ok {
-		return nil, fmt.Errorf("index: session %s not found", id)
+	out := make([]SessionInfo, 0, len(sessions))
+	for _, sess := range sessions {
+		docs, _ := s.eng.ListDocuments(ctx, sess.ID)
+		out = append(out, sessionToInfo(sess, docs))
 	}
 
-	return sess, nil
+	return out, nil
 }
 
-// DeleteSession removes a session from memory and disk.
+// GetSession returns a single session by ID with its documents.
+func (s *IndexService) GetSession(id string) (*SessionInfo, error) {
+	ctx := context.Background()
+
+	sid, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("index: invalid session id: %w", err)
+	}
+
+	sess, err := s.eng.GetSession(ctx, sid)
+	if err != nil {
+		return nil, fmt.Errorf("index: session %s not found: %w", id, err)
+	}
+
+	docs, _ := s.eng.ListDocuments(ctx, sid)
+	info := sessionToInfo(sess, docs)
+	return &info, nil
+}
+
+// DeleteSession removes a session.
 func (s *IndexService) DeleteSession(id string) error {
-	s.mu.Lock()
-	delete(s.sessions, id)
-	delete(s.stores, id)
-	s.mu.Unlock()
+	ctx := context.Background()
 
-	return session.Delete(id)
+	sid, err := uuid.Parse(id)
+	if err != nil {
+		return fmt.Errorf("index: invalid session id: %w", err)
+	}
+
+	return s.eng.DeleteSession(ctx, sid)
 }
 
 // PickFiles opens a native multi-file dialog and returns selected paths.
@@ -168,74 +170,146 @@ func (s *IndexService) PickDisk() (string, error) {
 
 // IndexPaths triggers ingestion of the given paths into the session (async).
 func (s *IndexService) IndexPaths(sessionID string, paths []string) error {
-	s.mu.RLock()
-	sess, ok := s.sessions[sessionID]
-	st := s.stores[sessionID]
-	s.mu.RUnlock()
-
-	if !ok {
-		return fmt.Errorf("index: session %s not found", sessionID)
+	sid, err := uuid.Parse(sessionID)
+	if err != nil {
+		return fmt.Errorf("index: invalid session id: %w", err)
 	}
 
 	go func() {
 		ctx := context.Background()
 		app := application.Get()
 
-		onProgress := func(docID, docName, stage string, pct int) {
-			if stage == "done" || pct == 100 {
-				return
-			}
-
-			if len(stage) > 5 && stage[:5] == "error" {
-				app.Event.Emit("index:error", IndexErrorEvent{
-					SessionID: sessionID,
-					DocName:   docName,
-					Error:     stage,
-				})
-
-				return
-			}
-
-			app.Event.Emit("index:progress", IndexProgressEvent{
-				SessionID: sessionID,
-				DocID:     docID,
-				DocName:   docName,
-				Stage:     stage,
-				Pct:       pct,
-			})
-		}
-
-		if err := indexer.IndexPaths(ctx, s.eng, sess, st, paths, onProgress); err != nil {
+		files, err := collectFiles(paths)
+		if err != nil {
 			app.Event.Emit("index:error", IndexErrorEvent{
 				SessionID: sessionID,
 				DocName:   "batch",
 				Error:     err.Error(),
 			})
-
 			return
 		}
 
-		// Save store.
-		if err := st.Save(sessionID); err != nil {
-			app.Event.Emit("index:error", IndexErrorEvent{
+		for _, path := range files {
+			if err := ctx.Err(); err != nil {
+				return
+			}
+
+			name := filepath.Base(path)
+
+			app.Event.Emit("index:progress", IndexProgressEvent{
 				SessionID: sessionID,
-				DocName:   "store",
-				Error:     err.Error(),
+				DocName:   name,
+				Stage:     "reading",
+				Pct:       5,
 			})
 
-			return
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				app.Event.Emit("index:error", IndexErrorEvent{
+					SessionID: sessionID,
+					DocName:   name,
+					Error:     fmt.Sprintf("read: %v", err),
+				})
+				continue
+			}
+
+			text := string(raw)
+			if !utf8.ValidString(text) {
+				app.Event.Emit("index:error", IndexErrorEvent{
+					SessionID: sessionID,
+					DocName:   name,
+					Error:     "file is not valid UTF-8 text",
+				})
+				continue
+			}
+
+			app.Event.Emit("index:progress", IndexProgressEvent{
+				SessionID: sessionID,
+				DocName:   name,
+				Stage:     "embedding",
+				Pct:       20,
+			})
+
+			ext := strings.ToLower(filepath.Ext(path))
+			input := enginebus.AddDocumentInput{
+				SessionID:   sid,
+				Name:        name,
+				Path:        path,
+				Text:        text,
+				ContentType: ext,
+			}
+
+			if err := s.eng.AddDocumentText(ctx, input); err != nil {
+				app.Event.Emit("index:error", IndexErrorEvent{
+					SessionID: sessionID,
+					DocName:   name,
+					Error:     err.Error(),
+				})
+				continue
+			}
+
+			app.Event.Emit("index:progress", IndexProgressEvent{
+				SessionID: sessionID,
+				DocName:   name,
+				Stage:     "done",
+				Pct:       100,
+			})
 		}
-
-		// Regroup.
-		s.mu.RLock()
-		currentSess := s.sessions[sessionID]
-		s.mu.RUnlock()
-
-		currentSess.Groups = grouper.GroupDocuments(currentSess.Documents)
-		_ = currentSess.Save()
 
 		app.Event.Emit("index:complete", IndexCompleteEvent{SessionID: sessionID})
 	}()
 
 	return nil
+}
+
+// ─── helpers ───────────────────────────────────────────────────────────────
+
+func sessionToInfo(sess enginebus.Session, docs []enginebus.Document) SessionInfo {
+	docInfos := make([]DocumentInfo, 0, len(docs))
+	for _, d := range docs {
+		docInfos = append(docInfos, DocumentInfo{
+			ID:          d.ID.String(),
+			Name:        d.Name,
+			Path:        d.Path,
+			ContentType: d.ContentType,
+			Status:      d.Status.String(),
+		})
+	}
+
+	return SessionInfo{
+		ID:        sess.ID.String(),
+		Name:      sess.Name,
+		CreatedAt: sess.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		Documents: docInfos,
+	}
+}
+
+func collectFiles(paths []string) ([]string, error) {
+	var files []string
+
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil {
+			return nil, err
+		}
+
+		if info.IsDir() {
+			err := filepath.Walk(p, func(path string, fi os.FileInfo, err error) error {
+				if err != nil {
+					return nil
+				}
+				if !fi.IsDir() && supportedExts[strings.ToLower(filepath.Ext(path))] {
+					files = append(files, path)
+				}
+				return nil
+			})
+			if err != nil {
+				return nil, err
+			}
+		} else if supportedExts[strings.ToLower(filepath.Ext(p))] {
+			files = append(files, p)
+		}
+	}
+
+	return files, nil
 }

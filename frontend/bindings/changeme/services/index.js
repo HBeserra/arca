@@ -12,11 +12,14 @@ export {
 export {
     ChatCitationEvent,
     ChatDoneEvent,
+    ChatErrorEvent,
     ChatTokenEvent,
     Citation,
+    DocumentInfo,
     HistoryMessage,
     IndexCompleteEvent,
     IndexErrorEvent,
     IndexProgressEvent,
-    QueryConfig
+    QueryConfig,
+    SessionInfo
 } from "./models.js";

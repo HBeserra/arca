@@ -4,7 +4,6 @@ import { ChatPanel } from "@/components/ChatPanel";
 import { KnowledgeBasePanel } from "@/components/KnowledgeBasePanel";
 import { ConfigPanel } from "@/components/ConfigPanel";
 import { StatusBar } from "@/components/StatusBar";
-import { defaultConfig } from "@/lib/mock-data";
 import type { Message, AppConfig, Session } from "@/lib/types";
 import * as IndexService from "../bindings/changeme/services/indexservice";
 
@@ -13,7 +12,25 @@ export default function App() {
   const [activeSessionID, setActiveSessionID] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [config, setConfig] = useState<AppConfig>(defaultConfig);
+  const [config, setConfig] = useState<AppConfig>({
+    model: {
+      model: "gpt-oss-20b",
+      systemPrompt: "You are a helpful assistant. Answer questions using the provided context. If the context does not contain the answer, say so.",
+      temperature: 0.7,
+      topP: 0.9,
+      maxTokens: 2048,
+      presencePenalty: 0,
+      frequencyPenalty: 0,
+    },
+    rag: {
+      chunkSize: 512,
+      chunkOverlap: 64,
+      topK: 5,
+      similarityThreshold: 0.3,
+      embeddingModel: "embeddinggemma-300m",
+      useReranker: false,
+    },
+  });
 
   // Load persisted sessions on mount.
   useEffect(() => {

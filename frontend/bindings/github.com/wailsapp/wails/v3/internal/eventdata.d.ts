@@ -14,6 +14,7 @@ declare module "@wailsio/runtime" {
         interface CustomEvents {
             "chat:citation": services$0.ChatCitationEvent;
             "chat:done": services$0.ChatDoneEvent;
+            "chat:error": services$0.ChatErrorEvent;
             "chat:token": services$0.ChatTokenEvent;
             "index:complete": services$0.IndexCompleteEvent;
             "index:error": services$0.IndexErrorEvent;

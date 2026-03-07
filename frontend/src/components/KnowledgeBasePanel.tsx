@@ -7,8 +7,6 @@ import {
   Plus,
   Trash2,
   FolderOpen,
-  ChevronDown,
-  ChevronRight,
   HardDrive,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,7 +15,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { isMac } from "@/lib/platform";
-import type { Session, SessionDocument, SessionGroup, IndexProgressPayload } from "@/lib/types";
+import type { Session, SessionDocument, IndexProgressPayload } from "@/lib/types";
 import * as IndexService from "../../bindings/changeme/services/indexservice";
 import { Events } from "@wailsio/runtime";
 
@@ -47,7 +45,6 @@ export function KnowledgeBasePanel({
   const [newSessionName, setNewSessionName] = useState("");
   const [creatingSession, setCreatingSession] = useState(false);
   const [progress, setProgress] = useState<Record<string, DocProgress>>({});
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const activeSession = sessions.find((s) => s.id === activeSessionID) ?? null;
   const isIndexing = Object.keys(progress).length > 0;
@@ -126,15 +123,6 @@ export function KnowledgeBasePanel({
       await IndexService.IndexPaths(activeSessionID, [path]);
     }
   }, [activeSessionID]);
-
-  const toggleGroup = (id: string) => {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
 
   return (
     <div className="flex flex-col h-full">
@@ -260,66 +248,18 @@ export function KnowledgeBasePanel({
               </div>
             )}
 
-            {/* Groups + documents */}
+            {/* Documents */}
             <div className="px-2 py-2">
               {activeSession.documents.length === 0 && !isIndexing && (
                 <p className="text-xs text-muted-foreground text-center py-4 px-2">
                   No documents yet. Add files above.
                 </p>
               )}
-
-              {activeSession.groups.length > 0 ? (
-                <GroupedView
-                  session={activeSession}
-                  expandedGroups={expandedGroups}
-                  onToggleGroup={toggleGroup}
-                />
-              ) : (
-                <FlatView docs={activeSession.documents} />
-              )}
+              <FlatView docs={activeSession.documents} />
             </div>
           </>
         )}
       </ScrollArea>
-    </div>
-  );
-}
-
-function GroupedView({
-  session,
-  expandedGroups,
-  onToggleGroup,
-}: {
-  session: Session;
-  expandedGroups: Set<string>;
-  onToggleGroup: (id: string) => void;
-}) {
-  const docMap = new Map(session.documents.map((d) => [d.id, d]));
-
-  // Ungrouped docs
-  const groupedIDs = new Set(session.groups.flatMap((g) => g.doc_ids));
-  const ungrouped = session.documents.filter((d) => !groupedIDs.has(d.id));
-
-  return (
-    <div className="space-y-1">
-      {session.groups.map((group) => (
-        <GroupRow
-          key={group.id}
-          group={group}
-          docs={group.doc_ids.map((id) => docMap.get(id)).filter(Boolean) as SessionDocument[]}
-          expanded={expandedGroups.has(group.id)}
-          onToggle={() => onToggleGroup(group.id)}
-        />
-      ))}
-
-      {ungrouped.length > 0 && (
-        <>
-          {session.groups.length > 0 && <Separator className="my-1" />}
-          {ungrouped.map((doc) => (
-            <DocRow key={doc.id} doc={doc} />
-          ))}
-        </>
-      )}
     </div>
   );
 }
@@ -330,39 +270,6 @@ function FlatView({ docs }: { docs: SessionDocument[] }) {
       {docs.map((doc) => (
         <DocRow key={doc.id} doc={doc} />
       ))}
-    </div>
-  );
-}
-
-function GroupRow({
-  group,
-  docs,
-  expanded,
-  onToggle,
-}: {
-  group: SessionGroup;
-  docs: SessionDocument[];
-  expanded: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div>
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-1 px-1.5 py-1 rounded-md hover:bg-accent/50 text-xs font-semibold text-muted-foreground uppercase tracking-wider transition-colors"
-      >
-        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        <span className="truncate flex-1 text-left">{group.label}</span>
-        <span className="text-xs font-normal normal-case">{docs.length}</span>
-      </button>
-
-      {expanded && (
-        <div className="ml-3 space-y-0.5 mt-0.5">
-          {docs.map((doc) => (
-            <DocRow key={doc.id} doc={doc} compact />
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -382,13 +289,7 @@ function DocRow({ doc, compact = false }: { doc: SessionDocument; compact?: bool
           {!compact && (
             <div className="flex items-center gap-2 mt-1">
               <StatusBadge status={doc.status} />
-              {doc.chunk_count > 0 && (
-                <span className="text-xs text-muted-foreground">{doc.chunk_count} chunks</span>
-              )}
             </div>
-          )}
-          {!compact && doc.summary && (
-            <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{doc.summary}</p>
           )}
         </div>
         {compact && <StatusDot status={doc.status} />}
@@ -398,7 +299,7 @@ function DocRow({ doc, compact = false }: { doc: SessionDocument; compact?: bool
 }
 
 function StatusBadge({ status }: { status: SessionDocument["status"] }) {
-  if (status === "indexed") return <Badge variant="success">Indexed</Badge>;
+  if (status === "completed") return <Badge variant="success">Indexed</Badge>;
   if (status === "processing")
     return (
       <Badge variant="warning" className="gap-1">
@@ -418,7 +319,7 @@ function StatusDot({ status }: { status: SessionDocument["status"] }) {
   return (
     <div
       className={cn("h-2 w-2 rounded-full mt-1 flex-shrink-0", {
-        "bg-green-500": status === "indexed",
+        "bg-green-500": status === "completed",
         "bg-yellow-500 animate-pulse": status === "processing",
         "bg-red-500": status === "error",
       })}

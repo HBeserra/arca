@@ -113,6 +113,21 @@ func (mr *MockStoreMockRecorder) GetSession(ctx, sessionID any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSession", reflect.TypeOf((*MockStore)(nil).GetSession), ctx, sessionID)
 }
 
+// ListSessions mocks base method.
+func (m *MockStore) ListSessions(ctx context.Context) ([]enginebus.Session, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListSessions", ctx)
+	ret0, _ := ret[0].([]enginebus.Session)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListSessions indicates an expected call of ListSessions.
+func (mr *MockStoreMockRecorder) ListSessions(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListSessions", reflect.TypeOf((*MockStore)(nil).ListSessions), ctx)
+}
+
 // ListDocuments mocks base method.
 func (m *MockStore) ListDocuments(ctx context.Context, sessionID uuid.UUID) ([]enginebus.Document, error) {
 	m.ctrl.T.Helper()

@@ -80,6 +80,44 @@ export class ChatDoneEvent {
 }
 
 /**
+ * ChatErrorEvent is emitted when the query pipeline fails.
+ */
+export class ChatErrorEvent {
+    /**
+     * Creates a new ChatErrorEvent instance.
+     * @param {Partial<ChatErrorEvent>} [$$source = {}] - The source object to create the ChatErrorEvent.
+     */
+    constructor($$source = {}) {
+        if (!("sessionID" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["sessionID"] = "";
+        }
+        if (!("error" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["error"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ChatErrorEvent instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {ChatErrorEvent}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ChatErrorEvent(/** @type {Partial<ChatErrorEvent>} */($$parsedSource));
+    }
+}
+
+/**
  * ChatTokenEvent carries a streaming token from the model.
  */
 export class ChatTokenEvent {
@@ -180,6 +218,65 @@ export class Citation {
     static createFrom($$source = {}) {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new Citation(/** @type {Partial<Citation>} */($$parsedSource));
+    }
+}
+
+/**
+ * DocumentInfo is the JSON-serialisable view of a document.
+ */
+export class DocumentInfo {
+    /**
+     * Creates a new DocumentInfo instance.
+     * @param {Partial<DocumentInfo>} [$$source = {}] - The source object to create the DocumentInfo.
+     */
+    constructor($$source = {}) {
+        if (!("id" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["id"] = "";
+        }
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("path" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["path"] = "";
+        }
+        if (!("content_type" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["content_type"] = "";
+        }
+        if (!("status" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["status"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DocumentInfo instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {DocumentInfo}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DocumentInfo(/** @type {Partial<DocumentInfo>} */($$parsedSource));
     }
 }
 
@@ -415,6 +512,64 @@ export class QueryConfig {
     }
 }
 
+/**
+ * SessionInfo is the JSON-serialisable view of a session.
+ */
+export class SessionInfo {
+    /**
+     * Creates a new SessionInfo instance.
+     * @param {Partial<SessionInfo>} [$$source = {}] - The source object to create the SessionInfo.
+     */
+    constructor($$source = {}) {
+        if (!("id" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["id"] = "";
+        }
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("created_at" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["created_at"] = "";
+        }
+        if (!("documents" in $$source)) {
+            /**
+             * @member
+             * @type {DocumentInfo[]}
+             */
+            this["documents"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SessionInfo instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {SessionInfo}
+     */
+    static createFrom($$source = {}) {
+        const $$createField3_0 = $$createType3;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("documents" in $$parsedSource) {
+            $$parsedSource["documents"] = $$createField3_0($$parsedSource["documents"]);
+        }
+        return new SessionInfo(/** @type {Partial<SessionInfo>} */($$parsedSource));
+    }
+}
+
 // Private type creation functions
 const $$createType0 = Citation.createFrom;
 const $$createType1 = $Create.Array($$createType0);
+const $$createType2 = DocumentInfo.createFrom;
+const $$createType3 = $Create.Array($$createType2);

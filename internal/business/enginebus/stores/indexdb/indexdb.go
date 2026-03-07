@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"changeme/internal/business/enginebus"
@@ -36,15 +38,72 @@ func New(log *slog.Logger, db *sql.DB, opts ...Option) (*Store, error) {
 	return s, nil
 }
 
+// validateOrResetChunks checks whether the existing chunks table (if any) was
+// created with the same embedding dimension as s.dimensions. If the dimensions
+// differ the chunks table (and its HNSW index) are dropped so that init()
+// recreates them with the correct schema.
+func (s *Store) validateOrResetChunks() error {
+	var tableCount int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM duckdb_tables() WHERE table_name = 'chunks'`,
+	).Scan(&tableCount); err != nil {
+		return fmt.Errorf("check chunks table existence: %w", err)
+	}
+	if tableCount == 0 {
+		return nil // nothing to validate
+	}
+
+	var colType string
+	if err := s.db.QueryRow(
+		`SELECT data_type FROM duckdb_columns()
+		 WHERE table_name = 'chunks' AND column_name = 'embedding'`,
+	).Scan(&colType); err != nil {
+		return fmt.Errorf("read embedding column type: %w", err)
+	}
+
+	existingDim, err := parseDimFromType(colType)
+	if err != nil {
+		s.log.Warn("could not parse embedding dimension from schema, recreating chunks table",
+			"column_type", colType, "err", err)
+	}
+
+	if err != nil || existingDim != s.dimensions {
+		s.log.Warn("embedding dimension mismatch — dropping and recreating chunks table",
+			"existing_dim", existingDim, "configured_dim", s.dimensions)
+		if _, err := s.db.Exec(`DROP TABLE IF EXISTS chunks`); err != nil {
+			return fmt.Errorf("drop chunks table: %w", err)
+		}
+	}
+	return nil
+}
+
+// parseDimFromType extracts the array length from a DuckDB column type string
+// such as "FLOAT[768]" or "float[768]".
+var reDim = regexp.MustCompile(`(?i)float\[(\d+)\]`)
+
+func parseDimFromType(t string) (int, error) {
+	m := reDim.FindStringSubmatch(t)
+	if m == nil {
+		return 0, fmt.Errorf("unexpected type format: %q", t)
+	}
+	return strconv.Atoi(m[1])
+}
+
 func (s *Store) init() error {
+	if err := s.validateOrResetChunks(); err != nil {
+		return err
+	}
+
 	stmts := []string{
 		`INSTALL vss; LOAD vss;`,
 		`SET hnsw_enable_experimental_persistence = true;`,
 		`CREATE TABLE IF NOT EXISTS sessions (
-			id            TEXT    PRIMARY KEY,
-			chat_history  JSON    NOT NULL DEFAULT '[]',
-			batch_size    INTEGER NOT NULL DEFAULT 4096,
-			batch_overlap INTEGER NOT NULL DEFAULT 512
+			id            TEXT      PRIMARY KEY,
+			name          VARCHAR   NOT NULL DEFAULT '',
+			created_at    TIMESTAMP NOT NULL DEFAULT current_timestamp,
+			chat_history  JSON      NOT NULL DEFAULT '[]',
+			batch_size    INTEGER   NOT NULL DEFAULT 4096,
+			batch_overlap INTEGER   NOT NULL DEFAULT 512
 		);`,
 		`CREATE TABLE IF NOT EXISTS documents (
 			id           TEXT    PRIMARY KEY,
@@ -54,8 +113,9 @@ func (s *Store) init() error {
 			content_type VARCHAR NOT NULL,
 			status       VARCHAR NOT NULL DEFAULT 'waiting'
 		);`,
+		`CREATE SEQUENCE IF NOT EXISTS chunk_id_seq START 1;`,
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS chunks (
-			id          INTEGER PRIMARY KEY,
+			id          INTEGER PRIMARY KEY DEFAULT nextval('chunk_id_seq'),
 			document_id TEXT    NOT NULL,
 			session_id  TEXT    NOT NULL,
 			text        VARCHAR NOT NULL,
@@ -80,11 +140,11 @@ func (s *Store) init() error {
 	}
 
 	if idxCount == 0 {
-		idxSQL := fmt.Sprintf(`
+		idxSQL := `
 			CREATE INDEX idx_chunk_embedding ON chunks
 			USING HNSW (embedding)
 			WITH (metric = 'cosine');
-		`)
+		`
 		if _, err := s.db.Exec(idxSQL); err != nil {
 			return fmt.Errorf("creating hnsw index: %w", err)
 		}
@@ -102,9 +162,9 @@ func (s *Store) CreateSession(ctx context.Context, session enginebus.Session) er
 	}
 
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO sessions (id, chat_history, batch_size, batch_overlap)
-		 VALUES ($1, $2, $3, $4)`,
-		m.ID, m.ChatHistory, m.BatchSize, m.BatchOverlap,
+		`INSERT INTO sessions (id, name, created_at, chat_history, batch_size, batch_overlap)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		m.ID, m.Name, m.CreatedAt, m.ChatHistory, m.BatchSize, m.BatchOverlap,
 	)
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
@@ -115,10 +175,10 @@ func (s *Store) CreateSession(ctx context.Context, session enginebus.Session) er
 func (s *Store) GetSession(ctx context.Context, sessionID uuid.UUID) (enginebus.Session, error) {
 	var m dbSession
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, chat_history, batch_size, batch_overlap
+		`SELECT id, name, created_at, chat_history, batch_size, batch_overlap
 		 FROM sessions WHERE id = $1`,
 		sessionID.String(),
-	).Scan(&m.ID, &m.ChatHistory, &m.BatchSize, &m.BatchOverlap)
+	).Scan(&m.ID, &m.Name, &m.CreatedAt, &m.ChatHistory, &m.BatchSize, &m.BatchOverlap)
 	if err != nil {
 		return enginebus.Session{}, fmt.Errorf("get session: %w", err)
 	}
@@ -153,6 +213,33 @@ func (s *Store) DeleteSession(ctx context.Context, sessionID uuid.UUID) error {
 		return fmt.Errorf("delete session: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) ListSessions(ctx context.Context) ([]enginebus.Session, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, created_at, chat_history, batch_size, batch_overlap FROM sessions`)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var sessions []enginebus.Session
+	for rows.Next() {
+		var m dbSession
+		if err := rows.Scan(&m.ID, &m.Name, &m.CreatedAt, &m.ChatHistory, &m.BatchSize, &m.BatchOverlap); err != nil {
+			return nil, fmt.Errorf("scan session: %w", err)
+		}
+		sess, err := toSession(m)
+		if err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, sess)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list sessions rows: %w", err)
+	}
+
+	return sessions, nil
 }
 
 // ─── Document methods ──────────────────────────────────────────────────────
@@ -229,7 +316,7 @@ func (s *Store) AddDocumentChunk(ctx context.Context, documentID uuid.UUID, chun
 	vecLiteral := floatSliceToLiteral(vec)
 	insertSQL := fmt.Sprintf(
 		`INSERT INTO chunks (document_id, session_id, text, embedding)
-		 VALUES ($1, $2, $3, %s)`,
+		 VALUES  ($1, $2, $3, %s)`,
 		vecLiteral,
 	)
 	if _, err := s.db.ExecContext(ctx, insertSQL, documentID.String(), sessionIDStr, chunk); err != nil {

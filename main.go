@@ -2,12 +2,20 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	_ "embed"
+	"fmt"
 	"log"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
-	"changeme/internal/engine"
+	_ "github.com/marcboeker/go-duckdb/v2"
+
+	"changeme/internal/business/enginebus"
+	"changeme/internal/business/enginebus/stores/indexdb"
 	"changeme/services"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -17,9 +25,9 @@ import (
 var assets embed.FS
 
 const (
-	embedModelURL  = "https://huggingface.co/ggml-org/embeddinggemma-300m-qat-q8_0-GGUF/resolve/main/embeddinggemma-300m-qat-Q8_0.gguf"
-	rerankModelURL = "https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF/resolve/main/bge-reranker-v2-m3-Q8_0.gguf"
-	chatModelURL   = "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf"
+	embedModelURL  = "ggml-org/embeddinggemma-300m-qat-q8_0-GGUF/embeddinggemma-300m-qat-Q8_0.gguf"
+	rerankModelURL = "gpustack/bge-reranker-v2-m3-GGUF/bge-reranker-v2-m3-Q8_0.gguf"
+	chatModelURL   = "unsloth/Qwen3-0.6B-GGUF/Qwen3-0.6B-Q8_0.gguf"
 )
 
 func init() {
@@ -29,28 +37,45 @@ func init() {
 	application.RegisterEvent[services.ChatTokenEvent]("chat:token")
 	application.RegisterEvent[services.ChatCitationEvent]("chat:citation")
 	application.RegisterEvent[services.ChatDoneEvent]("chat:done")
+	application.RegisterEvent[services.ChatErrorEvent]("chat:error")
 }
 
 func main() {
-	eng := engine.New(embedModelURL, rerankModelURL, chatModelURL)
+	logger := slog.Default()
 
-	// Initialise Kronk libs and catalog in the background (downloads on first run).
+	db, err := sql.Open("duckdb", dbPath())
+	if err != nil {
+		log.Fatalf("open duckdb: %v", err)
+	}
+
+	store, err := indexdb.New(logger, db,
+		indexdb.WithDimensions(768), // embeddinggemma-300m → 768-dim vectors (300M = params, not dims)
+	)
+	if err != nil {
+		log.Fatalf("indexdb init: %v", err)
+	}
+
+	eng, err := enginebus.New(logger, store,
+		enginebus.WithEmbedModel(embedModelURL),
+		enginebus.WithRerankModel(rerankModelURL),
+		enginebus.WithChatModel(chatModelURL),
+	)
+	if err != nil {
+		log.Fatalf("engine init: %v", err)
+	}
+
+	// Download libs and models in the background.
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 
-		if err := eng.Init(ctx); err != nil {
-			log.Printf("engine init: %v", err)
+		if err := eng.Load(ctx); err != nil {
+			log.Printf("engine load: %v", err)
 		}
 	}()
 
 	idxSvc := services.NewIndexService(eng)
-	qrySvc := services.NewQueryService(eng, idxSvc)
-
-	// Load persisted sessions.
-	if err := idxSvc.LoadAll(); err != nil {
-		log.Printf("session load: %v", err)
-	}
+	qrySvc := services.NewQueryService(eng)
 
 	app := application.New(application.Options{
 		Name:        "Arca",
@@ -71,8 +96,8 @@ func main() {
 		Title: "Arca",
 		Mac: application.MacWindow{
 			InvisibleTitleBarHeight: 50,
-			Backdrop:                application.MacBackdropTranslucent,
-			TitleBar:                application.MacTitleBarHiddenInset,
+			Backdrop:                application.MacBackdropNormal,
+			TitleBar:                application.MacTitleBarDefault,
 		},
 		BackgroundColour: application.NewRGB(27, 38, 54),
 		URL:              "/",
@@ -81,4 +106,27 @@ func main() {
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// dbPath returns ~/.arca/arca.db, creating the directory if needed.
+func dbPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+
+	dir := filepath.Join(home, ".arca")
+	_ = os.MkdirAll(dir, 0o700)
+
+	// environment base name for the database file, useful for testing
+	buildInfo := os.Getenv("ARCA_DB_BUILD_INFO")
+
+	vals := os.Environ()
+	for _, v := range vals {
+		fmt.Println(v)
+	}
+
+	filename := fmt.Sprintf("arca-%s.db", buildInfo)
+
+	return filepath.Join(dir, filename)
 }

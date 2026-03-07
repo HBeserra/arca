@@ -13,12 +13,12 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import * as session$0 from "../internal/session/models.js";
+import * as $models from "./models.js";
 
 /**
  * CreateSession creates and persists a new named session.
  * @param {string} name
- * @returns {$CancellablePromise<session$0.Session | null>}
+ * @returns {$CancellablePromise<$models.SessionInfo | null>}
  */
 export function CreateSession(name) {
     return $Call.ByID(1189593107, name).then(/** @type {($result: any) => any} */(($result) => {
@@ -27,7 +27,7 @@ export function CreateSession(name) {
 }
 
 /**
- * DeleteSession removes a session from memory and disk.
+ * DeleteSession removes a session.
  * @param {string} id
  * @returns {$CancellablePromise<void>}
  */
@@ -36,9 +36,9 @@ export function DeleteSession(id) {
 }
 
 /**
- * GetSession returns a single session by ID.
+ * GetSession returns a single session by ID with its documents.
  * @param {string} id
- * @returns {$CancellablePromise<session$0.Session | null>}
+ * @returns {$CancellablePromise<$models.SessionInfo | null>}
  */
 export function GetSession(id) {
     return $Call.ByID(2138721437, id).then(/** @type {($result: any) => any} */(($result) => {
@@ -57,21 +57,13 @@ export function IndexPaths(sessionID, paths) {
 }
 
 /**
- * ListSessions returns all in-memory sessions.
- * @returns {$CancellablePromise<(session$0.Session | null)[]>}
+ * ListSessions returns all persisted sessions.
+ * @returns {$CancellablePromise<$models.SessionInfo[]>}
  */
 export function ListSessions() {
     return $Call.ByID(425874660).then(/** @type {($result: any) => any} */(($result) => {
         return $$createType2($result);
     }));
-}
-
-/**
- * LoadAll restores persisted sessions into memory. Call once at startup.
- * @returns {$CancellablePromise<void>}
- */
-export function LoadAll() {
-    return $Call.ByID(3186125932);
 }
 
 /**
@@ -101,7 +93,7 @@ export function PickFolder() {
 }
 
 // Private type creation functions
-const $$createType0 = session$0.Session.createFrom;
+const $$createType0 = $models.SessionInfo.createFrom;
 const $$createType1 = $Create.Nullable($$createType0);
-const $$createType2 = $Create.Array($$createType1);
+const $$createType2 = $Create.Array($$createType0);
 const $$createType3 = $Create.Array($Create.Any);

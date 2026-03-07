@@ -1,6 +1,8 @@
 package enginebus
 
 import (
+	"time"
+
 	"github.com/ardanlabs/kronk/sdk/kronk/model"
 	"github.com/google/uuid"
 )
@@ -8,6 +10,8 @@ import (
 // Session represents a user session, which can have multiple documents and associated metadata.
 type Session struct {
 	ID          uuid.UUID
+	Name        string
+	CreatedAt   time.Time
 	ChatHistory []model.D
 
 	// Configurable parameters for embedding

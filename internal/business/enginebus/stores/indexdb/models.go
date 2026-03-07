@@ -3,6 +3,7 @@ package indexdb
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"changeme/internal/business/enginebus"
 	"changeme/internal/business/types/status"
@@ -17,6 +18,8 @@ import (
 
 type dbSession struct {
 	ID           string
+	Name         string
+	CreatedAt    time.Time
 	ChatHistory  any // DuckDB returns JSON columns as already-decoded interface{}
 	BatchSize    int
 	BatchOverlap int
@@ -52,8 +55,14 @@ func toDBSession(s enginebus.Session) (dbSession, error) {
 	if err != nil {
 		return dbSession{}, fmt.Errorf("marshal chat_history: %w", err)
 	}
+	createdAt := s.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
 	return dbSession{
 		ID:           s.ID.String(),
+		Name:         s.Name,
+		CreatedAt:    createdAt,
 		ChatHistory:  string(b),
 		BatchSize:    s.BatchSize,
 		BatchOverlap: s.BatchsOverlap,
@@ -92,6 +101,8 @@ func toSession(d dbSession) (enginebus.Session, error) {
 
 	return enginebus.Session{
 		ID:            id,
+		Name:          d.Name,
+		CreatedAt:     d.CreatedAt,
 		ChatHistory:   history,
 		BatchSize:     d.BatchSize,
 		BatchsOverlap: d.BatchOverlap,

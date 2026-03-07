@@ -56,11 +56,11 @@ export function ChatPanel({
       setIsStreaming(false);
     });
 
-    const offError = Events.On("chat:error", () => {
+    const offError = Events.On("chat:error", (e: { data: { error: string } }) => {
       setMessages((prev) =>
         prev.map((m) =>
           m.isStreaming
-            ? { ...m, isStreaming: false, content: m.content || "(error)" }
+            ? { ...m, isStreaming: false, content: `Error: ${e.data?.error ?? "unknown error"}` }
             : m
         )
       );

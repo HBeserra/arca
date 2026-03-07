@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/ardanlabs/kronk/sdk/kronk"
@@ -24,18 +25,27 @@ type (
 
 	// Engine manages the lifecycle of the LLM engine, including model loading and inference.
 	Engine struct {
-		logger   *slog.Logger
-		store    Store
-		krnEmbed *kronk.Kronk // Embedding model instance
-		krnChat  *kronk.Kronk // Chat model instance
-		autoLoad bool
+		logger    *slog.Logger
+		store     Store
+		krnEmbed  *kronk.Kronk // Embedding model instance
+		krnChat   *kronk.Kronk // Chat model instance
+		krnRerank *kronk.Kronk // Reranking model instance
+		autoLoad  bool
 
-		modelEmbedURL string
-		modelChatURL  string
+		modelEmbedURL  string
+		modelChatURL   string
+		modelRerankURL string
 	}
 
 	// Vector is a slice of float32 representing the embedding vector for a document chunk.
 	Vector []float32
+
+	// RankedDoc holds a document text with its reranker relevance score.
+	RankedDoc struct {
+		Index          int
+		Text           string
+		RelevanceScore float64
+	}
 
 	// Store defines the interface for persisting sessions, documents, and their embeddings.
 	Store interface {
@@ -43,6 +53,7 @@ type (
 		GetSession(ctx context.Context, sessionID uuid.UUID) (Session, error)
 		UpdateSession(ctx context.Context, session Session) error
 		DeleteSession(ctx context.Context, sessionID uuid.UUID) error
+		ListSessions(ctx context.Context) ([]Session, error)
 
 		CreateDocument(ctx context.Context, doc Document) error
 		UpdateDocument(ctx context.Context, doc Document) error
@@ -60,6 +71,10 @@ func WithChatModel(url string) Option {
 
 func WithEmbedModel(url string) Option {
 	return func(e *Engine) { e.modelEmbedURL = url }
+}
+
+func WithRerankModel(url string) Option {
+	return func(e *Engine) { e.modelRerankURL = url }
 }
 
 func New(logger *slog.Logger, store Store, opts ...Option) (*Engine, error) {
@@ -105,14 +120,17 @@ func (e *Engine) Eject(ctx context.Context) error {
 	errs := []error{}
 
 	if e.krnEmbed != nil {
-		err := e.krnEmbed.Unload(ctx)
-		if err != nil {
+		if err := e.krnEmbed.Unload(ctx); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	if e.krnChat != nil {
-		err := e.krnChat.Unload(ctx)
-		if err != nil {
+		if err := e.krnChat.Unload(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if e.krnRerank != nil {
+		if err := e.krnRerank.Unload(ctx); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -135,6 +153,8 @@ func (e *Engine) Close(ctx context.Context) error {
 func (e *Engine) CreateSession(ctx context.Context, name string, opts ...SessionOption) (Session, error) {
 	session := Session{
 		ID:            uuid.New(),
+		Name:          name,
+		CreatedAt:     time.Now(),
 		ChatHistory:   []model.D{},
 		BatchSize:     4096,
 		BatchsOverlap: 512,
@@ -161,16 +181,18 @@ type AddDocumentInput struct {
 }
 
 func (e *Engine) AddDocumentText(ctx context.Context, input AddDocumentInput) error {
-	e.logger.Info("Adding document to engine", "sessionID", input.SessionID, "name", input.Name, "path", input.Path)
+	e.logger.Info("Adding text document to engine", "sessionID", input.SessionID, "name", input.Name, "path", input.Path)
 
 	s, err := e.store.GetSession(ctx, input.SessionID)
 	if err != nil {
+		e.logger.Error("Error retrieving session for adding document", "sessionID", input.SessionID, "error", err)
 		return fmt.Errorf("getting session: %w", err)
 	}
 
 	documentID := uuid.New()
 	doc := Document{
 		ID:          documentID,
+		SessionID:   input.SessionID,
 		Name:        input.Name,
 		Path:        input.Path,
 		ContentType: input.ContentType,
@@ -179,6 +201,7 @@ func (e *Engine) AddDocumentText(ctx context.Context, input AddDocumentInput) er
 
 	err = e.store.CreateDocument(ctx, doc)
 	if err != nil {
+		e.logger.Error("Error creating document in store", "documentID", documentID, "error", err)
 		return fmt.Errorf("creating document: %w", err)
 	}
 
@@ -216,12 +239,14 @@ func (e *Engine) AddDocumentText(ctx context.Context, input AddDocumentInput) er
 		// Get embeddings for this chunk
 		vec, err := e.generateEmbedding(ctx, chunkStr)
 		if err != nil {
+			e.logger.Error("Error generating embedding for document chunk", "documentID", documentID, "chunkIndex", chunkIndex, "error", err)
 			return fmt.Errorf("error generating embedding for chunk %d: %w", chunkIndex, err)
 		}
 
-		// Store chunk with embeddings
+		// Store chunk with embeddingsß
 		err = e.store.AddDocumentChunk(ctx, documentID, chunkStr, vec)
 		if err != nil {
+			e.logger.Error("Error adding document chunk to store", "documentID", documentID, "chunkIndex", chunkIndex, "error", err)
 			return fmt.Errorf("error inserting chunk %d: %w", chunkIndex, err)
 		}
 
@@ -229,6 +254,7 @@ func (e *Engine) AddDocumentText(ctx context.Context, input AddDocumentInput) er
 		chunkIndex++
 	}
 
+	doc.Status = status.Completed
 	e.logger.Info("Finished processing document", "sessionID", doc.SessionID, "documentID", documentID, "chunkCount", chunkIndex)
 	e.store.UpdateDocument(ctx, doc)
 
@@ -311,6 +337,10 @@ func (e *Engine) AddDocumentTextStream(ctx context.Context, doc AddDocumentStrea
 }
 
 func (e *Engine) SearchDocs(ctx context.Context, sessionID uuid.UUID, query string) ([]Fragment, error) {
+	if e.krnEmbed == nil {
+		return nil, fmt.Errorf("embedding model not loaded yet")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -397,14 +427,14 @@ func (e *Engine) loadModels(ctx context.Context) error {
 		return fmt.Errorf("unable to create models api: %w", err)
 	}
 
-	infoEmbed, err := mdls.Download(context.Background(), kronk.FmtLogger, e.modelEmbedURL, "")
+	infoEmbed, err := mdls.Download(ctx, kronk.FmtLogger, e.modelEmbedURL, "")
 	if err != nil {
-		return fmt.Errorf("unable to install model: %w", err)
+		return fmt.Errorf("unable to install embed model: %w", err)
 	}
 
-	infoChat, err := mdls.Download(context.Background(), kronk.FmtLogger, e.modelChatURL, "")
+	infoChat, err := mdls.Download(ctx, kronk.FmtLogger, e.modelChatURL, "")
 	if err != nil {
-		return fmt.Errorf("unable to install model: %w", err)
+		return fmt.Errorf("unable to install chat model: %w", err)
 	}
 
 	krnEmbed, err := e.newKronk(infoEmbed)
@@ -420,7 +450,148 @@ func (e *Engine) loadModels(ctx context.Context) error {
 	e.krnEmbed = krnEmbed
 	e.krnChat = krnChat
 
+	if e.modelRerankURL != "" {
+		infoRerank, err := mdls.Download(ctx, kronk.FmtLogger, e.modelRerankURL, "")
+		if err != nil {
+			return fmt.Errorf("unable to install rerank model: %w", err)
+		}
+
+		krnRerank, err := e.newKronk(infoRerank)
+		if err != nil {
+			return fmt.Errorf("unable to create rerank model: %w", err)
+		}
+
+		e.krnRerank = krnRerank
+	}
+
 	return nil
+}
+
+// ChatStream sends messages and returns a channel of streaming chat responses.
+func (e *Engine) ChatStream(ctx context.Context, msgs []model.D) (<-chan model.ChatResponse, error) {
+	if e.krnChat == nil {
+		return nil, fmt.Errorf("chat model not loaded")
+	}
+
+	d := model.D{
+		"messages":   msgs,
+		"max_tokens": 2048,
+	}
+
+	ch, err := e.krnChat.ChatStreaming(ctx, d)
+	if err != nil {
+		return nil, fmt.Errorf("chat stream: %w", err)
+	}
+
+	return ch, nil
+}
+
+// Rerank reranks documents by relevance to the query.
+func (e *Engine) Rerank(ctx context.Context, query string, docs []string) ([]RankedDoc, error) {
+	if e.krnRerank == nil {
+		return nil, fmt.Errorf("rerank model not loaded")
+	}
+
+	d := model.D{
+		"query":            query,
+		"documents":        docs,
+		"top_n":            len(docs),
+		"return_documents": true,
+	}
+
+	resp, err := e.krnRerank.Rerank(ctx, d)
+	if err != nil {
+		return nil, fmt.Errorf("rerank: %w", err)
+	}
+
+	ranked := make([]RankedDoc, 0, len(resp.Data))
+	for _, r := range resp.Data {
+		ranked = append(ranked, RankedDoc{
+			Index:          r.Index,
+			Text:           r.Document,
+			RelevanceScore: float64(r.RelevanceScore),
+		})
+	}
+
+	return ranked, nil
+}
+
+// Summarize generates a short summary of text using the chat model.
+func (e *Engine) Summarize(text string) (string, error) {
+	if e.krnChat == nil {
+		return "", fmt.Errorf("chat model not loaded")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	maxLen := len(text)
+	if maxLen > 2000 {
+		maxLen = 2000
+	}
+
+	msgs := model.DocumentArray(
+		model.TextMessage(model.RoleSystem, "You are a summarizer. Respond with a single concise sentence (max 30 words) summarizing the document."),
+		model.TextMessage(model.RoleUser, "Summarize:\n\n"+text[:maxLen]),
+	)
+
+	d := model.D{
+		"messages":   msgs,
+		"max_tokens": 80,
+	}
+
+	ch, err := e.krnChat.ChatStreaming(ctx, d)
+	if err != nil {
+		return "", fmt.Errorf("summarize: %w", err)
+	}
+
+	var sb strings.Builder
+	for resp := range ch {
+		if len(resp.Choice) == 0 {
+			continue
+		}
+		if resp.Choice[0].FinishReason() == model.FinishReasonStop || resp.Choice[0].FinishReason() == model.FinishReasonError {
+			break
+		}
+		sb.WriteString(resp.Choice[0].Delta.Content)
+	}
+
+	return sb.String(), nil
+}
+
+// GetSession returns a single session by ID.
+func (e *Engine) GetSession(ctx context.Context, sessionID uuid.UUID) (Session, error) {
+	sess, err := e.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return Session{}, fmt.Errorf("get session: %w", err)
+	}
+	return sess, nil
+}
+
+// DeleteSession removes a session by ID.
+func (e *Engine) DeleteSession(ctx context.Context, sessionID uuid.UUID) error {
+	if err := e.store.DeleteSession(ctx, sessionID); err != nil {
+		return fmt.Errorf("delete session: %w", err)
+	}
+	return nil
+}
+
+// ListSessions returns all sessions from the store.
+func (e *Engine) ListSessions(ctx context.Context) ([]Session, error) {
+	sessions, err := e.store.ListSessions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	return sessions, nil
+}
+
+// ListDocuments returns all documents for a session.
+func (e *Engine) ListDocuments(ctx context.Context, sessionID uuid.UUID) ([]Document, error) {
+	docs, err := e.store.ListDocuments(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("list documents: %w", err)
+	}
+	return docs, nil
 }
 
 func (e *Engine) newKronk(mp models.Path) (*kronk.Kronk, error) {
