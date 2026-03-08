@@ -37,8 +37,6 @@ interface Props {
 }
 
 interface DocProgress {
-  docName: string;
-  stage: string;
   pct: number;
 }
 
@@ -54,6 +52,7 @@ export function KnowledgeBasePanel({
   const [creatingSession, setCreatingSession] = useState(false);
   const [isIndexing, setIsIndexing] = useState(false);
   const [progress, setProgress] = useState<Record<string, DocProgress>>({});
+  const [totalFiles, setTotalFiles] = useState(0);
   const [renamingSession, setRenamingSession] = useState(false);
   const renameDraftRef = useRef("");           // always current, no stale-closure risk
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -68,13 +67,30 @@ export function KnowledgeBasePanel({
   // Listen to index events — register once, never re-subscribe.
   useEffect(() => {
     const offProgress = Events.On("index:progress", (e: { data: IndexProgressPayload }) => {
-      const { docID, docName, stage, pct } = e.data;
-      setProgress((prev) => ({ ...prev, [docID]: { docName, stage, pct } }));
+      const { docID, pct, sessionID } = e.data;
+      setProgress((prev) => ({ ...prev, [docID]: { pct } }));
+      if (pct === 100) {
+        IndexService.GetSession(sessionID).then((sess) => {
+          if (sess) onSessionUpdatedRef.current(sess as unknown as Session);
+        });
+      }
+    });
+
+    // index:queued fires synchronously after all docs are registered as "waiting".
+    const offQueued = Events.On("index:queued", (e: { data: { sessionID: string } }) => {
+      IndexService.GetSession(e.data.sessionID).then((sess) => {
+        if (sess) {
+          const fileCount = (sess as unknown as Session).documents.filter((d) => d.type === "file").length;
+          setTotalFiles(fileCount);
+          onSessionUpdatedRef.current(sess as unknown as Session);
+        }
+      });
     });
 
     const offComplete = Events.On("index:complete", (e: { data: { sessionID: string } }) => {
       setIsIndexing(false);
       setProgress({});
+      setTotalFiles(0);
       IndexService.GetSession(e.data.sessionID).then((sess) => {
         if (sess) onSessionUpdatedRef.current(sess as unknown as Session);
       });
@@ -83,9 +99,11 @@ export function KnowledgeBasePanel({
     const offError = Events.On("index:error", () => {
       setIsIndexing(false);
       setProgress({});
+      setTotalFiles(0);
     });
 
     return () => {
+      offQueued();
       offProgress();
       offComplete();
       offError();
@@ -291,30 +309,6 @@ export function KnowledgeBasePanel({
               </div>
             </div>
 
-            {/* Progress overlay */}
-            {isIndexing && (
-              <div className="px-3 py-2 space-y-2">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  Indexing…
-                </p>
-                {Object.entries(progress).map(([docID, p]) => (
-                  <div key={docID} className="space-y-0.5">
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span className="truncate flex-1">{p.docName}</span>
-                      <span className="ml-2 shrink-0">{p.pct}%</span>
-                    </div>
-                    <div className="h-1 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className="h-full bg-primary rounded-full transition-all duration-200"
-                        style={{ width: `${p.pct}%` }}
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground/60">{p.stage}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-
             {/* Documents */}
             <div className="px-2 py-2">
               {activeSession.documents.length === 0 && !isIndexing && (
@@ -327,6 +321,27 @@ export function KnowledgeBasePanel({
           </>
         )}
       </ScrollArea>
+
+      {/* Progress bar — fixed at the bottom of the panel */}
+      {isIndexing && (() => {
+        const done = Object.values(progress).reduce((sum, p) => sum + p.pct, 0);
+        const total = Math.max(totalFiles, 1) * 100;
+        const pct = Math.min(100, Math.round((done / total) * 100));
+        return (
+          <div className="border-t px-3 py-2 space-y-1.5">
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span className="font-medium">Indexing…</span>
+              <span>{pct}%</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full bg-primary rounded-full transition-all duration-300"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -388,21 +403,27 @@ function countFiles(node: TreeNode): number {
   return node.children.reduce((sum, child) => sum + countFiles(child), 0);
 }
 
-type FolderStatus = "processing" | "error" | "idle";
+type FolderStatus = "processing" | "completed" | "error" | "idle";
 
 function folderStatus(node: TreeNode): FolderStatus {
   if (node.doc.type === "file") {
     if (node.doc.status === "processing") return "processing";
     if (node.doc.status === "error") return "error";
+    if (node.doc.status === "completed") return "completed";
     return "idle";
   }
+  if (node.children.length === 0) return "idle";
   let hasError = false;
+  let hasCompleted = false;
   for (const child of node.children) {
     const s = folderStatus(child);
     if (s === "processing") return "processing";
     if (s === "error") hasError = true;
+    if (s === "completed") hasCompleted = true;
   }
-  return hasError ? "error" : "idle";
+  if (hasError) return "error";
+  if (hasCompleted) return "completed";
+  return "idle";
 }
 
 function FolderRow({ node }: { node: TreeNode }) {
@@ -424,6 +445,9 @@ function FolderRow({ node }: { node: TreeNode }) {
         <span className="text-muted-foreground/60 shrink-0">{fileCount}</span>
         {status === "processing" && (
           <div className="h-2 w-2 rounded-full bg-yellow-500 animate-pulse flex-shrink-0" />
+        )}
+        {status === "completed" && (
+          <div className="h-2 w-2 rounded-full bg-green-500 flex-shrink-0" />
         )}
         {status === "error" && (
           <div className="h-2 w-2 rounded-full bg-red-500 flex-shrink-0" />

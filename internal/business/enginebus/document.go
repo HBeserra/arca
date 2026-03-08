@@ -25,4 +25,6 @@ type Fragment struct {
 	Similarity  float64
 	Text        string
 	Embedding   Vector
+	FileName    string
+	StartLine   int
 }

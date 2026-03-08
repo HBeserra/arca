@@ -9,12 +9,23 @@ export interface Citation {
   score: number;
 }
 
+export interface ModelUsage {
+  promptTokens: number;
+  reasoningTokens: number;
+  completionTokens: number;
+  outputTokens: number;
+  contextTokens: number;
+  contextWindow: number;
+  tokensPerSecond: number;
+}
+
 export interface Message {
   id: string;
   role: MessageRole;
   content: string;
   reasoning?: string;
   citations?: Citation[];
+  usage?: ModelUsage;
   isStreaming?: boolean;
   timestamp: Date;
 }
@@ -70,6 +81,13 @@ export interface ChatCitationPayload {
 
 export interface ChatDonePayload {
   sessionID: string;
+  promptTokens: number;
+  reasoningTokens: number;
+  completionTokens: number;
+  outputTokens: number;
+  contextTokens: number;
+  contextWindow: number;
+  tokensPerSecond: number;
 }
 
 export interface ModelConfig {

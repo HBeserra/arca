@@ -31,6 +31,11 @@ type IndexCompleteEvent struct {
 	SessionID string `json:"sessionID"`
 }
 
+// IndexQueuedEvent is emitted once all documents have been registered (before embedding starts).
+type IndexQueuedEvent struct {
+	SessionID string `json:"sessionID"`
+}
+
 // IndexErrorEvent is emitted when a document fails to index.
 type IndexErrorEvent struct {
 	SessionID string `json:"sessionID"`
@@ -196,61 +201,71 @@ func (s *IndexService) PickDisk() (string, error) {
 	return s.PickFolder()
 }
 
-// IndexPaths triggers ingestion of the given paths into the session (async).
-// Directories are represented as a single folder document in the sidebar;
-// their files are indexed as children. Plain files are indexed at the root level.
+// pendingFile holds a registered document waiting to be embedded.
+type pendingFile struct {
+	doc  enginebus.Document
+	text string
+}
+
+// IndexPaths registers all documents immediately (status: waiting), emits
+// index:queued so the UI can show them, then embeds each file in a background
+// goroutine.
 func (s *IndexService) IndexPaths(sessionID string, paths []string) error {
 	sid, err := uuid.Parse(sessionID)
 	if err != nil {
 		return fmt.Errorf("index: invalid session id: %w", err)
 	}
 
-	go func() {
-		ctx := context.Background()
+	ctx := context.Background()
 
-		for _, p := range paths {
-			if ctx.Err() != nil {
-				return
-			}
-			info, err := os.Stat(p)
-			if err != nil {
-				application.Get().Event.Emit("index:error", IndexErrorEvent{
-					SessionID: sessionID,
-					DocName:   filepath.Base(p),
-					Error:     err.Error(),
-				})
+	// Phase 1 — register all files synchronously so they appear in the UI.
+	var pending []pendingFile
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil {
+			application.Get().Event.Emit("index:error", IndexErrorEvent{
+				SessionID: sessionID,
+				DocName:   filepath.Base(p),
+				Error:     err.Error(),
+			})
+			continue
+		}
+		if info.IsDir() {
+			if s.ignoreFolder(p) {
 				continue
 			}
-			if info.IsDir() {
-				if s.ignoreFolder(p) {
-					continue
-				}
-				s.indexFolder(ctx, sid, sessionID, p)
-			} else {
-				if s.ignoreFile(p) {
-					continue
-				}
-
-				s.indexFile(ctx, sid, sessionID, p, nil)
+			files := s.registerFolder(ctx, sid, sessionID, p)
+			pending = append(pending, files...)
+		} else {
+			if s.ignoreFile(p) {
+				continue
 			}
-
-			application.Get().Event.Emit("index:complete", IndexCompleteEvent{SessionID: sessionID})
+			if pf, ok := s.registerFile(ctx, sid, sessionID, p, nil); ok {
+				pending = append(pending, pf)
+			}
 		}
-		_ = beeep.Notify("Arca — Indexing complete", fmt.Sprintf("All documents have been indexed into session %s.", sessionID), s.appIcon)
+	}
 
+	// Notify frontend: all documents are now visible as "waiting".
+	application.Get().Event.Emit("index:queued", IndexQueuedEvent{SessionID: sessionID})
+
+	// Phase 2 — embed each file in the background.
+	go func() {
+		for _, pf := range pending {
+			s.embedFile(ctx, sessionID, pf)
+		}
+		application.Get().Event.Emit("index:complete", IndexCompleteEvent{SessionID: sessionID})
+		_ = beeep.Notify("Arca — Indexing complete", fmt.Sprintf("All documents have been indexed into session %s.", sessionID), s.appIcon)
 	}()
 
 	return nil
 }
 
-// indexFolder creates a folder document tree mirroring the directory structure,
-// then indexes each supported file under its immediate parent folder.
-func (s *IndexService) indexFolder(ctx context.Context, sid uuid.UUID, sessionID, folderPath string) {
-	// folderIDs maps an absolute directory path → its document ID so that
-	// sub-folders and files can reference the correct parent.
+// registerFolder creates all folder records and registers every supported file
+// under the folder tree with status.Waiting. Returns the pending file list.
+func (s *IndexService) registerFolder(ctx context.Context, sid uuid.UUID, sessionID, folderPath string) []pendingFile {
 	folderIDs := map[string]uuid.UUID{}
 
-	// Create the root folder first.
 	root, err := s.eng.CreateFolder(ctx, sid, filepath.Base(folderPath), folderPath, nil)
 	if err != nil {
 		application.Get().Event.Emit("index:error", IndexErrorEvent{
@@ -258,89 +273,97 @@ func (s *IndexService) indexFolder(ctx context.Context, sid uuid.UUID, sessionID
 			DocName:   filepath.Base(folderPath),
 			Error:     err.Error(),
 		})
-		return
+		return nil
 	}
 	folderIDs[folderPath] = root.ID
+
+	var pending []pendingFile
 
 	filepath.Walk(folderPath, func(path string, fi os.FileInfo, err error) error {
 		if err != nil || path == folderPath {
 			return nil
 		}
-
 		parentID := folderIDs[filepath.Dir(path)]
 
 		if fi.IsDir() {
 			sub, err := s.eng.CreateFolder(ctx, sid, fi.Name(), path, &parentID)
 			if err != nil {
 				application.Get().Event.Emit("index:error", IndexErrorEvent{
-					SessionID: sessionID,
-					DocName:   fi.Name(),
-					Error:     err.Error(),
+					SessionID: sessionID, DocName: fi.Name(), Error: err.Error(),
 				})
 				return nil
 			}
 			folderIDs[path] = sub.ID
 		} else if supportedExts[strings.ToLower(filepath.Ext(path))] {
-			s.indexFile(ctx, sid, sessionID, path, &parentID)
+			if pf, ok := s.registerFile(ctx, sid, sessionID, path, &parentID); ok {
+				pending = append(pending, pf)
+			}
 		}
 		return nil
 	})
+
+	return pending
 }
 
-// indexFile reads, validates, embeds, and stores a single file document.
-func (s *IndexService) indexFile(ctx context.Context, sid uuid.UUID, sessionID, path string, parentID *uuid.UUID) {
+// registerFile reads and validates the file, creates the document record with
+// status.Waiting, and returns the pending work item.
+func (s *IndexService) registerFile(ctx context.Context, sid uuid.UUID, sessionID, path string, parentID *uuid.UUID) (pendingFile, bool) {
 	name := filepath.Base(path)
-	docID := uuid.New()
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		application.Get().Event.Emit("index:error", IndexErrorEvent{
+			SessionID: sessionID, DocName: name, Error: fmt.Sprintf("read: %v", err),
+		})
+		return pendingFile{}, false
+	}
+
+	text := string(raw)
+	if !utf8.ValidString(text) {
+		application.Get().Event.Emit("index:error", IndexErrorEvent{
+			SessionID: sessionID, DocName: name, Error: "file is not valid UTF-8 text",
+		})
+		return pendingFile{}, false
+	}
+
+	doc, err := s.eng.RegisterDocument(ctx, enginebus.AddDocumentInput{
+		SessionID:   sid,
+		ParentID:    parentID,
+		Name:        name,
+		Path:        path,
+		ContentType: strings.ToLower(filepath.Ext(path)),
+	})
+	if err != nil {
+		application.Get().Event.Emit("index:error", IndexErrorEvent{
+			SessionID: sessionID, DocName: name, Error: err.Error(),
+		})
+		return pendingFile{}, false
+	}
+
+	return pendingFile{doc: doc, text: text}, true
+}
+
+// embedFile runs the embedding pipeline for a single registered file and
+// emits progress events.
+func (s *IndexService) embedFile(ctx context.Context, sessionID string, pf pendingFile) {
+	name := pf.doc.Name
+	docID := pf.doc.ID.String()
 
 	emit := func(stage string, pct int) {
 		application.Get().Event.Emit("index:progress", IndexProgressEvent{
 			SessionID: sessionID,
-			DocID:     docID.String(),
+			DocID:     docID,
 			DocName:   name,
 			Stage:     stage,
 			Pct:       pct,
 		})
 	}
 
-	emit("reading", 5)
-
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		application.Get().Event.Emit("index:error", IndexErrorEvent{
-			SessionID: sessionID,
-			DocName:   name,
-			Error:     fmt.Sprintf("read: %v", err),
-		})
-		return
-	}
-
-	text := string(raw)
-	if !utf8.ValidString(text) {
-		application.Get().Event.Emit("index:error", IndexErrorEvent{
-			SessionID: sessionID,
-			DocName:   name,
-			Error:     "file is not valid UTF-8 text",
-		})
-		return
-	}
-
 	emit("embedding", 20)
 
-	input := enginebus.AddDocumentInput{
-		ID:          docID,
-		SessionID:   sid,
-		ParentID:    parentID,
-		Name:        name,
-		Path:        path,
-		Text:        text,
-		ContentType: strings.ToLower(filepath.Ext(path)),
-	}
-
-	if err := s.eng.AddDocumentText(ctx, input); err != nil {
+	if err := s.eng.EmbedDocument(ctx, pf.doc, pf.text); err != nil {
 		application.Get().Event.Emit("index:error", IndexErrorEvent{
-			SessionID: sessionID,
-			DocName:   name,
-			Error:     err.Error(),
+			SessionID: sessionID, DocName: name, Error: err.Error(),
 		})
 		return
 	}

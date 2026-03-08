@@ -43,6 +43,8 @@ type dbFragment struct {
 	ContentType string
 	Text        string
 	Embedding   any // DuckDB returns FLOAT[] as []interface{}{float32,...}
+	FileName    sql.NullString
+	StartLine   sql.NullInt64
 	Similarity  float64
 }
 
@@ -190,5 +192,7 @@ func toFragment(d dbFragment) (enginebus.Fragment, error) {
 		Text:        d.Text,
 		Embedding:   embedding,
 		Similarity:  d.Similarity,
+		FileName:    d.FileName.String,
+		StartLine:   int(d.StartLine.Int64),
 	}, nil
 }

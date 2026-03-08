@@ -123,9 +123,13 @@ func (s *Store) init() error {
 			id          INTEGER PRIMARY KEY DEFAULT nextval('chunk_id_seq'),
 			document_id TEXT    NOT NULL,
 			session_id  TEXT    NOT NULL,
+			file_name   VARCHAR NOT NULL DEFAULT '',
+			start_line  INTEGER NOT NULL DEFAULT 0,
 			text        VARCHAR NOT NULL,
 			embedding   FLOAT[%d]
 		);`, s.dimensions),
+		`ALTER TABLE chunks ADD COLUMN IF NOT EXISTS file_name VARCHAR;`,
+		`ALTER TABLE chunks ADD COLUMN IF NOT EXISTS start_line INTEGER;`,
 	}
 
 	for _, stmt := range stmts {
@@ -308,7 +312,7 @@ func (s *Store) ListDocuments(ctx context.Context, sessionID uuid.UUID) ([]engin
 
 // ─── Chunk methods ─────────────────────────────────────────────────────────
 
-func (s *Store) AddDocumentChunk(ctx context.Context, documentID uuid.UUID, chunk string, vec enginebus.Vector) error {
+func (s *Store) AddDocumentChunk(ctx context.Context, documentID uuid.UUID, fileName string, startLine int, chunk string, vec enginebus.Vector) error {
 	var sessionIDStr string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT session_id FROM documents WHERE id = $1`,
@@ -320,11 +324,11 @@ func (s *Store) AddDocumentChunk(ctx context.Context, documentID uuid.UUID, chun
 
 	vecLiteral := floatSliceToLiteral(vec)
 	insertSQL := fmt.Sprintf(
-		`INSERT INTO chunks (document_id, session_id, text, embedding)
-		 VALUES  ($1, $2, $3, %s)`,
+		`INSERT INTO chunks (document_id, session_id, file_name, start_line, text, embedding)
+		 VALUES ($1, $2, $3, $4, $5, %s)`,
 		vecLiteral,
 	)
-	if _, err := s.db.ExecContext(ctx, insertSQL, documentID.String(), sessionIDStr, chunk); err != nil {
+	if _, err := s.db.ExecContext(ctx, insertSQL, documentID.String(), sessionIDStr, fileName, startLine, chunk); err != nil {
 		return fmt.Errorf("add document chunk: %w", err)
 	}
 
@@ -335,7 +339,7 @@ func (s *Store) SearchDocuments(ctx context.Context, sessionID uuid.UUID, queryV
 	vecLiteral := floatSliceToLiteral(queryVec)
 	querySQL := fmt.Sprintf(`
 		SELECT c.session_id, c.document_id, d.path, d.content_type,
-		       c.text, c.embedding,
+		       c.text, c.embedding, c.file_name, c.start_line,
 		       array_cosine_similarity(c.embedding, %s::FLOAT[%d]) AS similarity
 		FROM chunks c
 		JOIN documents d ON d.id = c.document_id
@@ -355,7 +359,7 @@ func (s *Store) SearchDocuments(ctx context.Context, sessionID uuid.UUID, queryV
 		var m dbFragment
 		if err := rows.Scan(
 			&m.SessionID, &m.DocumentID, &m.Path, &m.ContentType,
-			&m.Text, &m.Embedding, &m.Similarity,
+			&m.Text, &m.Embedding, &m.FileName, &m.StartLine, &m.Similarity,
 		); err != nil {
 			return nil, fmt.Errorf("scan fragment: %w", err)
 		}

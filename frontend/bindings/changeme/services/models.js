@@ -102,7 +102,7 @@ export class ChatCitationEvent {
 }
 
 /**
- * ChatDoneEvent signals that streaming has finished.
+ * ChatDoneEvent signals that streaming has finished and carries model usage stats.
  */
 export class ChatDoneEvent {
     /**
@@ -116,6 +116,55 @@ export class ChatDoneEvent {
              * @type {string}
              */
             this["sessionID"] = "";
+        }
+        if (!("promptTokens" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["promptTokens"] = 0;
+        }
+        if (!("reasoningTokens" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["reasoningTokens"] = 0;
+        }
+        if (!("completionTokens" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["completionTokens"] = 0;
+        }
+        if (!("outputTokens" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["outputTokens"] = 0;
+        }
+        if (!("contextTokens" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["contextTokens"] = 0;
+        }
+        if (!("contextWindow" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["contextWindow"] = 0;
+        }
+        if (!("tokensPerSecond" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["tokensPerSecond"] = 0;
         }
 
         Object.assign(this, $$source);

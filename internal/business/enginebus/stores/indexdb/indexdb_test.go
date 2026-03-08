@@ -121,7 +121,7 @@ func TestAddChunkAndSearchDocuments(t *testing.T) {
 	require.NoError(t, store.CreateDocument(ctx, doc))
 
 	vec := enginebus.Vector{0.1, 0.2, 0.3, 0.4}
-	require.NoError(t, store.AddDocumentChunk(ctx, doc.ID, "hello world", vec))
+	require.NoError(t, store.AddDocumentChunk(ctx, doc.ID, "test.txt", 1, "hello world", vec))
 
 	queryVec := []float32{0.1, 0.2, 0.3, 0.4}
 	fragments, err := store.SearchDocuments(ctx, session.ID, queryVec)

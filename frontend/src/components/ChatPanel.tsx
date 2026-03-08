@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageBubble } from "./MessageBubble";
-import type { Message, Citation, ChatTokenPayload, ChatCitationPayload, Session } from "@/lib/types";
+import type { Message, Citation, ChatTokenPayload, ChatCitationPayload, ChatDonePayload, Session } from "@/lib/types";
 import * as QueryService from "../../bindings/changeme/services/queryservice";
 import { Events } from "@wailsio/runtime";
 
@@ -61,9 +61,14 @@ export function ChatPanel({
       );
     });
 
-    const offDone = Events.On("chat:done", () => {
+    const offDone = Events.On("chat:done", (e: { data: ChatDonePayload }) => {
+      const { promptTokens, reasoningTokens, completionTokens, outputTokens, contextTokens, contextWindow, tokensPerSecond } = e.data;
       setMessages((prev) =>
-        prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m))
+        prev.map((m) =>
+          m.isStreaming
+            ? { ...m, isStreaming: false, usage: { promptTokens, reasoningTokens, completionTokens, outputTokens, contextTokens, contextWindow, tokensPerSecond } }
+            : m
+        )
       );
       setIsStreaming(false);
     });

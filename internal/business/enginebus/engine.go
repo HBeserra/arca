@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ardanlabs/kronk/sdk/kronk"
 	"github.com/ardanlabs/kronk/sdk/kronk/model"
@@ -62,7 +63,7 @@ type (
 
 		CreateDocument(ctx context.Context, doc Document) error
 		UpdateDocument(ctx context.Context, doc Document) error
-		AddDocumentChunk(ctx context.Context, documentID uuid.UUID, chunk string, vec Vector) error
+		AddDocumentChunk(ctx context.Context, documentID uuid.UUID, fileName string, startLine int, chunk string, vec Vector) error
 		ListDocuments(ctx context.Context, sessionID uuid.UUID) ([]Document, error)
 		SearchDocuments(ctx context.Context, sessionID uuid.UUID, queryVec []float32) ([]Fragment, error)
 	}
@@ -217,15 +218,9 @@ func (e *Engine) CreateFolder(ctx context.Context, sessionID uuid.UUID, name, pa
 	return doc, nil
 }
 
-func (e *Engine) AddDocumentText(ctx context.Context, input AddDocumentInput) error {
-	e.logger.Info("Adding text document to engine", "sessionID", input.SessionID, "name", input.Name, "path", input.Path)
-
-	s, err := e.store.GetSession(ctx, input.SessionID)
-	if err != nil {
-		e.logger.Error("Error retrieving session for adding document", "sessionID", input.SessionID, "error", err)
-		return fmt.Errorf("getting session: %w", err)
-	}
-
+// RegisterDocument creates a document record with status.Waiting without processing
+// its content. Call EmbedDocument afterwards to run the embedding pipeline.
+func (e *Engine) RegisterDocument(ctx context.Context, input AddDocumentInput) (Document, error) {
 	documentID := input.ID
 	if documentID == uuid.Nil {
 		documentID = uuid.New()
@@ -238,69 +233,97 @@ func (e *Engine) AddDocumentText(ctx context.Context, input AddDocumentInput) er
 		Name:        input.Name,
 		Path:        input.Path,
 		ContentType: input.ContentType,
-		Status:      status.Processing,
+		Status:      status.Waiting,
 	}
+	if err := e.store.CreateDocument(ctx, doc); err != nil {
+		return Document{}, fmt.Errorf("register document: %w", err)
+	}
+	return doc, nil
+}
 
-	err = e.store.CreateDocument(ctx, doc)
+// EmbedDocument runs the embedding pipeline for an already-registered document.
+// It updates the document status to Processing, chunks and embeds the text,
+// then marks it Completed (or leaves it in an error state on failure).
+func (e *Engine) EmbedDocument(ctx context.Context, doc Document, text string) error {
+	e.logger.Info("Embedding document", "sessionID", doc.SessionID, "documentID", doc.ID, "name", doc.Name)
+
+	s, err := e.store.GetSession(ctx, doc.SessionID)
 	if err != nil {
-		e.logger.Error("Error creating document in store", "documentID", documentID, "error", err)
-		return fmt.Errorf("creating document: %w", err)
+		return fmt.Errorf("getting session: %w", err)
 	}
 
-	textBytes := []byte(input.Text)
+	doc.Status = status.Processing
+	e.store.UpdateDocument(ctx, doc)
+
+	textBytes := []byte(text)
 	chunkIndex := 0
+	currentLine := 1 // 1-based line counter tracking the start of each chunk's window
 	var previousChunk []byte
 
 	for i := 0; i < len(textBytes); i += s.BatchSize {
-		// Calculate end position for current chunk
 		end := i + s.BatchSize
 		if end > len(textBytes) {
 			end = len(textBytes)
+		} else {
+			// Advance end to the next UTF-8 rune boundary so we never split a multibyte character.
+			for end < len(textBytes) && !utf8.RuneStart(textBytes[end]) {
+				end++
+			}
 		}
 
-		// Create current chunk with overlap from previous chunk
 		var currentChunk []byte
-
+		startLine := currentLine
 		if chunkIndex == 0 {
-			// First chunk - no overlap
 			currentChunk = textBytes[i:end]
 		} else {
-			// Subsequent chunks - prepend overlap from previous chunk
 			overlapSize := s.BatchsOverlap
 			if overlapSize > len(previousChunk) {
 				overlapSize = len(previousChunk)
 			}
-
-			currentChunk = make([]byte, 0, overlapSize+end-i)
-			currentChunk = append(currentChunk, previousChunk[len(previousChunk)-overlapSize:]...)
+			// Also align the overlap start to a rune boundary.
+			overlapStart := len(previousChunk) - overlapSize
+			for overlapStart < len(previousChunk) && !utf8.RuneStart(previousChunk[overlapStart]) {
+				overlapStart++
+			}
+			// The chunk starts at the overlap offset into the previous window; adjust startLine.
+			startLine = currentLine - strings.Count(string(previousChunk[overlapStart:]), "\n")
+			currentChunk = make([]byte, 0, len(previousChunk)-overlapStart+end-i)
+			currentChunk = append(currentChunk, previousChunk[overlapStart:]...)
 			currentChunk = append(currentChunk, textBytes[i:end]...)
 		}
 
-		chunkStr := string(currentChunk)
+		chunkStr := fmt.Sprintf("[%s:%d]\n\n%s", doc.Path, startLine, string(currentChunk))
 
-		// Get embeddings for this chunk
 		vec, err := e.generateEmbedding(ctx, chunkStr)
 		if err != nil {
-			e.logger.Error("Error generating embedding for document chunk", "documentID", documentID, "chunkIndex", chunkIndex, "error", err)
-			return fmt.Errorf("error generating embedding for chunk %d: %w", chunkIndex, err)
+			e.logger.Error("Error generating embedding", "documentID", doc.ID, "chunkIndex", chunkIndex, "error", err)
+			return fmt.Errorf("embedding chunk %d: %w", chunkIndex, err)
 		}
 
-		// Store chunk with embeddingsß
-		err = e.store.AddDocumentChunk(ctx, documentID, chunkStr, vec)
-		if err != nil {
-			e.logger.Error("Error adding document chunk to store", "documentID", documentID, "chunkIndex", chunkIndex, "error", err)
-			return fmt.Errorf("error inserting chunk %d: %w", chunkIndex, err)
+		if err := e.store.AddDocumentChunk(ctx, doc.ID, doc.Name, startLine, chunkStr, vec); err != nil {
+			e.logger.Error("Error storing chunk", "documentID", doc.ID, "chunkIndex", chunkIndex, "error", err)
+			return fmt.Errorf("storing chunk %d: %w", chunkIndex, err)
 		}
 
+		// Advance currentLine by the number of newlines in the newly-read window (not the overlap).
+		currentLine += strings.Count(string(textBytes[i:end]), "\n")
 		previousChunk = currentChunk
 		chunkIndex++
 	}
 
 	doc.Status = status.Completed
-	e.logger.Info("Finished processing document", "sessionID", doc.SessionID, "documentID", documentID, "chunkCount", chunkIndex)
+	e.logger.Info("Finished embedding document", "sessionID", doc.SessionID, "documentID", doc.ID, "chunkCount", chunkIndex)
 	e.store.UpdateDocument(ctx, doc)
 
 	return nil
+}
+
+func (e *Engine) AddDocumentText(ctx context.Context, input AddDocumentInput) error {
+	doc, err := e.RegisterDocument(ctx, input)
+	if err != nil {
+		return err
+	}
+	return e.EmbedDocument(ctx, doc, input.Text)
 }
 
 type AddDocumentStreamInput struct {
@@ -321,6 +344,7 @@ func (e *Engine) AddDocumentTextStream(ctx context.Context, doc AddDocumentStrea
 	buffer := make([]byte, batchSize)
 	var previousChunk []byte
 	chunkIndex := 0
+	currentLine := 1
 
 	for {
 		// Read next chunk
@@ -334,6 +358,7 @@ func (e *Engine) AddDocumentTextStream(ctx context.Context, doc AddDocumentStrea
 
 		// Create current chunk with overlap from previous chunk
 		var currentChunk []byte
+		startLine := currentLine
 
 		if chunkIndex == 0 {
 			// First chunk - no overlap
@@ -345,9 +370,11 @@ func (e *Engine) AddDocumentTextStream(ctx context.Context, doc AddDocumentStrea
 			if overlapSize > len(previousChunk) {
 				overlapSize = len(previousChunk)
 			}
+			overlapStart := len(previousChunk) - overlapSize
+			startLine = currentLine - strings.Count(string(previousChunk[overlapStart:]), "\n")
 
 			currentChunk = make([]byte, overlapSize+n)
-			copy(currentChunk, previousChunk[len(previousChunk)-overlapSize:])
+			copy(currentChunk, previousChunk[overlapStart:])
 			copy(currentChunk[overlapSize:], buffer[:n])
 		}
 
@@ -360,10 +387,11 @@ func (e *Engine) AddDocumentTextStream(ctx context.Context, doc AddDocumentStrea
 		}
 
 		// Store chunk with embeddings
-		err = e.store.AddDocumentChunk(ctx, doc.SessionID, chunkStr, vec)
+		err = e.store.AddDocumentChunk(ctx, doc.SessionID, doc.Name, startLine, chunkStr, vec)
 		if err != nil {
 			return fmt.Errorf("error inserting chunk %d: %w", chunkIndex, err)
 		}
+		currentLine += strings.Count(string(buffer[:n]), "\n")
 
 		previousChunk = currentChunk
 		chunkIndex++

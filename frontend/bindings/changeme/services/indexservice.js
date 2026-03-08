@@ -54,9 +54,9 @@ export function GetSession(id) {
 }
 
 /**
- * IndexPaths triggers ingestion of the given paths into the session (async).
- * Directories are represented as a single folder document in the sidebar;
- * their files are indexed as children. Plain files are indexed at the root level.
+ * IndexPaths registers all documents immediately (status: waiting), emits
+ * index:queued so the UI can show them, then embeds each file in a background
+ * goroutine.
  * @param {string} sessionID
  * @param {string[]} paths
  * @returns {$CancellablePromise<void>}

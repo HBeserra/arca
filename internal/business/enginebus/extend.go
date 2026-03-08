@@ -19,6 +19,8 @@ type (
 		DeleteSession(ctx context.Context, id uuid.UUID) error
 		GetSession(ctx context.Context, sessionID uuid.UUID) (Session, error)
 		CreateFolder(ctx context.Context, sessionID uuid.UUID, name, path string, parentID *uuid.UUID) (Document, error)
+		RegisterDocument(ctx context.Context, input AddDocumentInput) (Document, error)
+		EmbedDocument(ctx context.Context, doc Document, text string) error
 		AddDocumentText(ctx context.Context, input AddDocumentInput) error
 		AddDocumentTextStream(ctx context.Context, doc AddDocumentStreamInput) error
 		SearchDocs(ctx context.Context, sessionID uuid.UUID, query string) ([]Fragment, error)

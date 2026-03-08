@@ -2,8 +2,42 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { Message } from "@/lib/types";
+import type { Message, ModelUsage } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+function UsageBar({ usage }: { usage: ModelUsage }) {
+  const ctxPct = usage.contextWindow > 0
+    ? Math.min(100, Math.round((usage.contextTokens / usage.contextWindow) * 100))
+    : 0;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex items-center gap-1.5 cursor-default">
+          <div className="flex items-center gap-1 text-xs text-muted-foreground/70">
+            <span>{usage.tokensPerSecond.toFixed(1)} t/s</span>
+            <span className="text-muted-foreground/40">·</span>
+            <span>{usage.contextTokens.toLocaleString()}/{usage.contextWindow.toLocaleString()}</span>
+          </div>
+          <div className="w-12 h-1 rounded-full bg-muted overflow-hidden">
+            <div
+              className={cn("h-full rounded-full", ctxPct > 85 ? "bg-red-500" : ctxPct > 60 ? "bg-yellow-500" : "bg-primary/50")}
+              style={{ width: `${ctxPct}%` }}
+            />
+          </div>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent className="text-xs space-y-0.5">
+        <p className="font-semibold mb-1">Model usage</p>
+        <p>Prompt: {usage.promptTokens.toLocaleString()} tokens</p>
+        {usage.reasoningTokens > 0 && <p>Reasoning: {usage.reasoningTokens.toLocaleString()} tokens</p>}
+        <p>Completion: {usage.completionTokens.toLocaleString()} tokens</p>
+        <p>Context: {usage.contextTokens.toLocaleString()} / {usage.contextWindow.toLocaleString()} ({ctxPct}%)</p>
+        <p>Speed: {usage.tokensPerSecond.toFixed(1)} tokens/s</p>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 interface MessageBubbleProps {
   message: Message;
@@ -150,9 +184,14 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         {message.citations && message.citations.length > 0 && (
           <CitationsBlock citations={message.citations} />
         )}
-        <p className="text-xs text-muted-foreground mt-1 px-1">
-          {message.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-        </p>
+        <div className="flex items-center gap-2 mt-1 px-1 flex-wrap">
+          <p className="text-xs text-muted-foreground">
+            {message.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </p>
+          {!isUser && message.usage && !message.isStreaming && (
+            <UsageBar usage={message.usage} />
+          )}
+        </div>
       </div>
       {isUser && (
         <div className="flex-shrink-0 w-7 h-7 rounded-full bg-secondary flex items-center justify-center text-secondary-foreground text-xs font-bold mt-1">

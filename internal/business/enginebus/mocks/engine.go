@@ -43,17 +43,17 @@ func (m *MockStore) EXPECT() *MockStoreMockRecorder {
 }
 
 // AddDocumentChunk mocks base method.
-func (m *MockStore) AddDocumentChunk(ctx context.Context, documentID uuid.UUID, chunk string, vec enginebus.Vector) error {
+func (m *MockStore) AddDocumentChunk(ctx context.Context, documentID uuid.UUID, fileName string, startLine int, chunk string, vec enginebus.Vector) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "AddDocumentChunk", ctx, documentID, chunk, vec)
+	ret := m.ctrl.Call(m, "AddDocumentChunk", ctx, documentID, fileName, startLine, chunk, vec)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // AddDocumentChunk indicates an expected call of AddDocumentChunk.
-func (mr *MockStoreMockRecorder) AddDocumentChunk(ctx, documentID, chunk, vec any) *gomock.Call {
+func (mr *MockStoreMockRecorder) AddDocumentChunk(ctx, documentID, fileName, startLine, chunk, vec any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddDocumentChunk", reflect.TypeOf((*MockStore)(nil).AddDocumentChunk), ctx, documentID, chunk, vec)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddDocumentChunk", reflect.TypeOf((*MockStore)(nil).AddDocumentChunk), ctx, documentID, fileName, startLine, chunk, vec)
 }
 
 // CreateDocument mocks base method.

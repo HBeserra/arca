@@ -55,9 +55,16 @@ type ChatReasoningEvent struct {
 	Token     string `json:"token"`
 }
 
-// ChatDoneEvent signals that streaming has finished.
+// ChatDoneEvent signals that streaming has finished and carries model usage stats.
 type ChatDoneEvent struct {
-	SessionID string `json:"sessionID"`
+	SessionID        string  `json:"sessionID"`
+	PromptTokens     int     `json:"promptTokens"`
+	ReasoningTokens  int     `json:"reasoningTokens"`
+	CompletionTokens int     `json:"completionTokens"`
+	OutputTokens     int     `json:"outputTokens"`
+	ContextTokens    int     `json:"contextTokens"`
+	ContextWindow    int     `json:"contextWindow"`
+	TokensPerSecond  float64 `json:"tokensPerSecond"`
 }
 
 // ChatErrorEvent is emitted when the query pipeline fails.
@@ -167,12 +174,14 @@ func (q *QueryService) query(sessionID, userMessage string, cfg QueryConfig) err
 		return fmt.Errorf("query: chat stream: %w", err)
 	}
 
+	var finalAnswer *enginebus.Answer
 	for event := range events {
 		if event.Err != nil {
 			return fmt.Errorf("query: model error: %w", event.Err)
 		}
 
 		if event.Answer != nil {
+			finalAnswer = event.Answer
 			break
 		}
 
@@ -191,7 +200,17 @@ func (q *QueryService) query(sessionID, userMessage string, cfg QueryConfig) err
 		}
 	}
 
-	app.Event.Emit("chat:done", ChatDoneEvent{SessionID: sessionID})
+	done := ChatDoneEvent{SessionID: sessionID}
+	if finalAnswer != nil {
+		done.PromptTokens = finalAnswer.PromptTokens
+		done.ReasoningTokens = finalAnswer.ReasoningTokens
+		done.CompletionTokens = finalAnswer.CompletionTokens
+		done.OutputTokens = finalAnswer.OutputTokens
+		done.ContextTokens = finalAnswer.ContextTokens
+		done.ContextWindow = finalAnswer.ContextWindow
+		done.TokensPerSecond = finalAnswer.TokensPerSecond
+	}
+	app.Event.Emit("chat:done", done)
 
 	return nil
 }

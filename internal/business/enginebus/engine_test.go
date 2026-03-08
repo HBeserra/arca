@@ -44,7 +44,7 @@ func TestEngine_EmbedFile(t *testing.T) {
 
 	storeMock.EXPECT().GetSession(ctx, sessionID).Return(session, nil)
 	storeMock.EXPECT().CreateDocument(ctx, gomock.Any()).Return(nil)
-	storeMock.EXPECT().AddDocumentChunk(ctx, gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	storeMock.EXPECT().AddDocumentChunk(ctx, gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 	err = engine.AddDocumentText(ctx, doc)
 	require.NoError(t, err)
