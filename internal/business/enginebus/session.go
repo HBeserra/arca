@@ -13,6 +13,7 @@ type Session struct {
 	Name        string
 	CreatedAt   time.Time
 	ChatHistory []model.D
+	ContextUsed uint64
 
 	// Configurable parameters for embedding
 	BatchSize     int

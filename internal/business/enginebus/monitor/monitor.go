@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"changeme/internal/business/enginebus"
 	"context"
 	"fmt"
 	"log/slog"
@@ -19,37 +20,10 @@ type (
 		logger     *slog.Logger
 	}
 
-	Status struct {
-		LoadedModels bool         `json:"loadedModels"`
-		Memory       MemoryStatus `json:"memory"`
-		Cpu          CpuStatus    `json:"cpu"`
-		Gpu          GpuStatus    `json:"gpu"`
-	}
-
-	MemoryStatus struct {
-		Total     uint64  `json:"total"`
-		Used      uint64  `json:"used"`
-		Available uint64  `json:"available"`
-		UsedPct   float64 `json:"usedPct"`
-	}
-
-	CpuStatus struct {
-		ProcessUsagePct float64 `json:"processUsagePct"`
-		SystemUsagePct  float64 `json:"systemUsagePct"`
-	}
-
-	GpuStatus struct {
-		TotalMemory    uint64  `json:"totalMemory"`
-		UsedMemory     uint64  `json:"usedMemory"`
-		FreeMemory     uint64  `json:"freeMemory"`
-		UsedPct        float64 `json:"usedPct"`
-		SystemUsagePct float64 `json:"systemUsagePct"`
-	}
-
 	statusCache struct {
 		CreatedAt      time.Time // last time all the status info was fetched; used for caching
 		LastUpdate     time.Time // last time the status info was updated; used for cpu/gpu load calculations
-		Status         *Status
+		Status         *enginebus.Status
 		Err            error
 		RecreateTicker *time.Ticker // used to trigger periodic status refreshes
 		RefreshTicker  *time.Ticker // used to trigger periodic status updates (cpu/gpu load)
@@ -107,7 +81,7 @@ func New(ctx context.Context, logger *slog.Logger, refreshInterval time.Duration
 	return b
 }
 
-func (b *Business) GetStatus(ctx context.Context) (*Status, error) {
+func (b *Business) GetStatus(ctx context.Context) (*enginebus.Status, error) {
 	if b.localCache.Status == nil || time.Since(b.localCache.CreatedAt) > 5*time.Minute {
 		return nil, ErrStatusNotAvailable
 	}
@@ -119,7 +93,7 @@ func (b *Business) GetStatus(ctx context.Context) (*Status, error) {
 	return b.localCache.Status, nil
 }
 
-func (b *Business) fetchStatus() (*Status, error) {
+func (b *Business) fetchStatus() (*enginebus.Status, error) {
 
 	memStats, err := b.fetchMemoryStatus()
 	if err != nil {
@@ -136,7 +110,7 @@ func (b *Business) fetchStatus() (*Status, error) {
 		return nil, fmt.Errorf("fetch gpu status: %w", err)
 	}
 
-	return &Status{
+	return &enginebus.Status{
 		LoadedModels: false, // Placeholder; actual model loading status would require additional logic
 		Memory:       memStats,
 		Cpu:          cpuStats,
@@ -144,31 +118,31 @@ func (b *Business) fetchStatus() (*Status, error) {
 	}, nil
 }
 
-func (b *Business) fetchCpuStatus() (CpuStatus, error) {
+func (b *Business) fetchCpuStatus() (enginebus.CpuStatus, error) {
 	p, err := process.NewProcess(int32(os.Getpid()))
 	if err != nil {
-		return CpuStatus{}, fmt.Errorf("fetch CPU status: %w", err)
+		return enginebus.CpuStatus{}, fmt.Errorf("fetch CPU status: %w", err)
 	}
 
 	cpuPercent, err := p.CPUPercent()
 	if err != nil {
-		return CpuStatus{}, fmt.Errorf("fetch CPU status: %w", err)
+		return enginebus.CpuStatus{}, fmt.Errorf("fetch CPU status: %w", err)
 	}
 
 	systemCpuPercent, err := cpu.Percent(time.Second, false)
 
 	if err != nil || len(systemCpuPercent) == 0 {
-		return CpuStatus{}, fmt.Errorf("fetch CPU status: %w", err)
+		return enginebus.CpuStatus{}, fmt.Errorf("fetch CPU status: %w", err)
 	}
 
-	return CpuStatus{
+	return enginebus.CpuStatus{
 		ProcessUsagePct: cpuPercent,
 		SystemUsagePct:  systemCpuPercent[0],
 	}, nil
 }
 
-func (b *Business) fetchGpuStatus() (GpuStatus, error) {
-	return GpuStatus{
+func (b *Business) fetchGpuStatus() (enginebus.GpuStatus, error) {
+	return enginebus.GpuStatus{
 		TotalMemory:    0,
 		UsedMemory:     0,
 		FreeMemory:     0,
@@ -177,15 +151,15 @@ func (b *Business) fetchGpuStatus() (GpuStatus, error) {
 	}, nil
 }
 
-func (b *Business) fetchMemoryStatus() (MemoryStatus, error) {
+func (b *Business) fetchMemoryStatus() (enginebus.MemoryStatus, error) {
 	// memInfo, err := b.process.MemoryInfo()
 	// if err != nil {
-	// 	return MemoryStatus{}, fmt.Errorf("fetch memory status: %w", err)
+	// 	return enginebus.MemoryStatus{}, fmt.Errorf("fetch memory status: %w", err)
 	// }
 
 	virtualMem, err := mem.VirtualMemory()
 	if err != nil {
-		return MemoryStatus{}, fmt.Errorf("fetch virtual memory status: %w", err)
+		return enginebus.MemoryStatus{}, fmt.Errorf("fetch virtual memory status: %w", err)
 	}
 
 	total := virtualMem.Total
@@ -193,7 +167,7 @@ func (b *Business) fetchMemoryStatus() (MemoryStatus, error) {
 	available := virtualMem.Available
 	usedPct := virtualMem.UsedPercent
 
-	return MemoryStatus{
+	return enginebus.MemoryStatus{
 		Total:     total,
 		Used:      used,
 		Available: available,

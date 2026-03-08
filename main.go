@@ -67,7 +67,7 @@ func main() {
 		enginebus.WithEmbedModel(embedModelURL),
 		enginebus.WithRerankModel(rerankModelURL),
 		enginebus.WithChatModel(chatModelURL),
-		enginebus.WithMonitor(mon),
+		enginebus.WithStatusProvider(mon),
 	)
 	if err != nil {
 		log.Fatalf("engine init: %v", err)

@@ -77,6 +77,7 @@ export interface ModelConfig {
   temperature: number;
   topP: number;
   maxTokens: number;
+  contextWindow: number; // model's total context window in tokens
   presencePenalty: number;
   frequencyPenalty: number;
 }

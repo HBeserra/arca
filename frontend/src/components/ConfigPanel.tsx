@@ -102,6 +102,16 @@ export function ConfigPanel({ config, onChange }: ConfigPanelProps) {
                   max={32768}
                 />
               </div>
+              <div className="space-y-1.5">
+                <Label>Context Window</Label>
+                <Input
+                  type="number"
+                  value={config.model.contextWindow}
+                  onChange={(e) => updateModel("contextWindow", Number(e.target.value))}
+                  min={512}
+                  max={1048576}
+                />
+              </div>
               <SliderField
                 label="Presence Penalty"
                 value={config.model.presencePenalty}

@@ -21,6 +21,7 @@ export default function App() {
       temperature: 0.7,
       topP: 0.9,
       maxTokens: 2048,
+      contextWindow: 32768,
       presencePenalty: 0,
       frequencyPenalty: 0,
     },
@@ -46,6 +47,15 @@ export default function App() {
   }, []);
 
   const activeSession = sessions.find((s) => s.id === activeSessionID) ?? null;
+
+  // Estimate context usage: sum all message chars + system prompt, divide by 4 (chars/token)
+  const estimatedTokens = Math.round(
+    (messages.reduce((sum, m) => sum + m.content.length, 0) +
+      config.model.systemPrompt.length) / 4
+  );
+  const contextPct = config.model.contextWindow > 0
+    ? Math.min(100, Math.round((estimatedTokens / config.model.contextWindow) * 100))
+    : 0;
 
   const queryConfig = {
     topK: config.rag.topK,
@@ -114,7 +124,7 @@ export default function App() {
           </div>
         </div>
 
-        <StatusBar model={config.model.model} />
+        <StatusBar model={config.model.model} contextPct={contextPct} contextTokens={estimatedTokens} contextWindow={config.model.contextWindow} />
       </div>
     </TooltipProvider>
   );

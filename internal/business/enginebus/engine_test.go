@@ -76,7 +76,7 @@ func TestEngine_AskWithDocs(t *testing.T) {
 
 	storeMock.EXPECT().GetSession(gomock.Any(), sessionID).Return(session, nil)
 
-	response, err := engine.QuestionSync(ctx, enginebus.Question{
+	response, err := engine.Chat(ctx, enginebus.Question{
 		SessionID: sessionID,
 		Content:   "What is the password for the secret vault?",
 		Fragments: []enginebus.Fragment{
@@ -115,7 +115,7 @@ func TestEngine_AskWithDocsStream(t *testing.T) {
 
 	storeMock.EXPECT().GetSession(gomock.Any(), sessionID).Return(session, nil)
 
-	events, err := engine.QuestionStream(ctx, enginebus.Question{
+	events, err := engine.ChatStream(ctx, enginebus.Question{
 		SessionID: sessionID,
 		Content:   "What is the password for the secret vault?",
 		Fragments: []enginebus.Fragment{

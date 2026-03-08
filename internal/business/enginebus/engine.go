@@ -2,7 +2,6 @@
 package enginebus
 
 import (
-	"changeme/internal/business/enginebus/monitor"
 	"changeme/internal/business/types/status"
 	"context"
 	"fmt"
@@ -26,17 +25,21 @@ type (
 
 	// Engine manages the lifecycle of the LLM engine, including model loading and inference.
 	Engine struct {
-		logger      *slog.Logger
-		store       Store
-		krnEmbed    *kronk.Kronk // Embedding model instance
-		krnChat     *kronk.Kronk // Chat model instance
-		krnRerank   *kronk.Kronk // Reranking model instance
-		statusCache *monitor.Business
+		logger    *slog.Logger
+		store     Store
+		krnEmbed  *kronk.Kronk // Embedding model instance
+		krnChat   *kronk.Kronk // Chat model instance
+		krnRerank *kronk.Kronk // Reranking model instance
+		status    StatusProvider
 
 		autoLoad       bool
 		modelEmbedURL  string
 		modelChatURL   string
 		modelRerankURL string
+	}
+
+	StatusProvider interface {
+		GetStatus(ctx context.Context) (*Status, error)
 	}
 
 	// Vector is a slice of float32 representing the embedding vector for a document chunk.
@@ -79,8 +82,8 @@ func WithRerankModel(url string) Option {
 	return func(e *Engine) { e.modelRerankURL = url }
 }
 
-func WithMonitor(m *monitor.Business) Option {
-	return func(e *Engine) { e.statusCache = m }
+func WithStatusProvider(sp StatusProvider) Option {
+	return func(e *Engine) { e.status = sp }
 }
 
 func New(logger *slog.Logger, store Store, opts ...Option) (ExtEngine, error) {

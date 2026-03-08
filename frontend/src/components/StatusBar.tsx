@@ -7,6 +7,9 @@ import * as IndexService from "../../bindings/changeme/services/indexservice";
 
 interface StatusBarProps {
   model: string;
+  contextPct: number;
+  contextTokens: number;
+  contextWindow: number;
 }
 
 interface SystemStats {
@@ -53,7 +56,7 @@ function useSystemStats(): SystemStats {
   return stats;
 }
 
-export function StatusBar({ model }: StatusBarProps) {
+export function StatusBar({ model, contextPct, contextTokens, contextWindow }: StatusBarProps) {
   const { theme, resolvedTheme, setTheme } = useTheme();
   const stats = useSystemStats();
 
@@ -135,6 +138,21 @@ export function StatusBar({ model }: StatusBarProps) {
             <span className="text-foreground tabular-nums">
               {stats.memTotalBytes > 0 ? `${cpuPct}%` : "—"}
             </span>
+          </span>
+
+          <Divider />
+
+          {/* Context window */}
+          <span
+            title={`~${contextTokens.toLocaleString()} / ${contextWindow.toLocaleString()} tokens`}
+            className={cn(
+              contextPct >= 60 ? "text-red-500" :
+              contextPct >= 30 ? "text-yellow-500" :
+              ""
+            )}
+          >
+            Ctx&nbsp;
+            <span className="tabular-nums font-medium">{contextPct}%</span>
           </span>
         </div>
 

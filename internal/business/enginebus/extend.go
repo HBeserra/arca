@@ -1,7 +1,6 @@
 package enginebus
 
 import (
-	"changeme/internal/business/enginebus/monitor"
 	"context"
 
 	"github.com/ardanlabs/kronk/sdk/kronk/model"
@@ -10,7 +9,7 @@ import (
 
 type (
 	ExtEngine interface {
-		Status(ctx context.Context) (*monitor.Status, error)
+		Status(ctx context.Context) (*Status, error)
 		Load(ctx context.Context) error
 		Eject(ctx context.Context) error
 		LoadedModels() bool
