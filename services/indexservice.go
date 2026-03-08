@@ -70,13 +70,13 @@ var supportedExts = map[string]bool{
 
 // IndexService is the Wails-facing service for session and ingestion management.
 type IndexService struct {
-	eng     *enginebus.Engine
+	eng     enginebus.ExtEngine
 	mu      sync.RWMutex
 	appIcon []byte
 }
 
 // NewIndexService returns a new IndexService.
-func NewIndexService(eng *enginebus.Engine, appIcon []byte) *IndexService {
+func NewIndexService(eng enginebus.ExtEngine, appIcon []byte) *IndexService {
 	return &IndexService{eng: eng, appIcon: appIcon}
 }
 

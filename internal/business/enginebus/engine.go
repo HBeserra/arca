@@ -83,7 +83,7 @@ func WithMonitor(m *monitor.Business) Option {
 	return func(e *Engine) { e.statusCache = m }
 }
 
-func New(logger *slog.Logger, store Store, opts ...Option) (*Engine, error) {
+func New(logger *slog.Logger, store Store, opts ...Option) (ExtEngine, error) {
 	e := &Engine{
 		logger:        logger,
 		store:         store,
@@ -403,112 +403,6 @@ func (e *Engine) SearchDocs(ctx context.Context, sessionID uuid.UUID, query stri
 	return fragments, nil
 }
 
-func (e *Engine) generateEmbedding(ctx context.Context, text string) (Vector, error) {
-	embedCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	d := model.D{
-		"input":              text,
-		"truncate":           true,
-		"truncate_direction": "right",
-	}
-
-	resp, err := e.krnEmbed.Embeddings(embedCtx, d)
-	if err != nil {
-		return nil, fmt.Errorf("embed: %w", err)
-	}
-
-	if len(resp.Data[0].Embedding) == 0 {
-		return nil, fmt.Errorf("empty vector")
-	}
-
-	// Convert float32 to float64
-	vec := make(Vector, len(resp.Data[0].Embedding))
-	copy(vec, resp.Data[0].Embedding)
-
-	return vec, nil
-}
-
-func (e *Engine) loadLibs(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
-	defer cancel()
-
-	libs, err := libs.New(
-		libs.WithVersion(defaults.LibVersion("")),
-	)
-	if err != nil {
-		return fmt.Errorf("unable to create libs manager: %w", err)
-	}
-
-	if _, err := libs.Download(ctx, kronk.FmtLogger); err != nil {
-		return fmt.Errorf("unable to install llama.cpp: %w", err)
-	}
-
-	return nil
-}
-
-func (e *Engine) updateCatalog(ctx context.Context) error {
-	ctlg, err := catalog.New()
-	if err != nil {
-		return fmt.Errorf("unable to create catalog system: %w", err)
-	}
-
-	if err := ctlg.Download(ctx); err != nil {
-		return fmt.Errorf("unable to download catalog: %w", err)
-	}
-
-	return nil
-}
-
-func (e *Engine) loadModels(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
-	defer cancel()
-
-	mdls, err := models.New()
-	if err != nil {
-		return fmt.Errorf("unable to create models api: %w", err)
-	}
-
-	infoEmbed, err := mdls.Download(ctx, kronk.FmtLogger, e.modelEmbedURL, "")
-	if err != nil {
-		return fmt.Errorf("unable to install embed model: %w", err)
-	}
-
-	infoChat, err := mdls.Download(ctx, kronk.FmtLogger, e.modelChatURL, "")
-	if err != nil {
-		return fmt.Errorf("unable to install chat model: %w", err)
-	}
-
-	krnEmbed, err := e.newKronk(infoEmbed)
-	if err != nil {
-		return fmt.Errorf("unable to create embedding model: %w", err)
-	}
-
-	krnChat, err := e.newKronk(infoChat)
-	if err != nil {
-		return fmt.Errorf("unable to create chat model: %w", err)
-	}
-
-	e.krnEmbed = krnEmbed
-	e.krnChat = krnChat
-
-	if e.modelRerankURL != "" {
-		infoRerank, err := mdls.Download(ctx, kronk.FmtLogger, e.modelRerankURL, "")
-		if err != nil {
-			return fmt.Errorf("unable to install rerank model: %w", err)
-		}
-
-		krnRerank, err := e.newKronk(infoRerank)
-		if err != nil {
-			return fmt.Errorf("unable to create rerank model: %w", err)
-		}
-
-		e.krnRerank = krnRerank
-	}
-
-	return nil
-}
-
 // ChatStream sends messages and returns a channel of streaming chat responses.
 func (e *Engine) ChatStream(ctx context.Context, msgs []model.D) (<-chan model.ChatResponse, error) {
 	if e.krnChat == nil {
@@ -658,6 +552,112 @@ func (e *Engine) ListDocuments(ctx context.Context, sessionID uuid.UUID) ([]Docu
 		return nil, fmt.Errorf("list documents: %w", err)
 	}
 	return docs, nil
+}
+
+func (e *Engine) generateEmbedding(ctx context.Context, text string) (Vector, error) {
+	embedCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	d := model.D{
+		"input":              text,
+		"truncate":           true,
+		"truncate_direction": "right",
+	}
+
+	resp, err := e.krnEmbed.Embeddings(embedCtx, d)
+	if err != nil {
+		return nil, fmt.Errorf("embed: %w", err)
+	}
+
+	if len(resp.Data[0].Embedding) == 0 {
+		return nil, fmt.Errorf("empty vector")
+	}
+
+	// Convert float32 to float64
+	vec := make(Vector, len(resp.Data[0].Embedding))
+	copy(vec, resp.Data[0].Embedding)
+
+	return vec, nil
+}
+
+func (e *Engine) loadLibs(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
+	defer cancel()
+
+	libs, err := libs.New(
+		libs.WithVersion(defaults.LibVersion("")),
+	)
+	if err != nil {
+		return fmt.Errorf("unable to create libs manager: %w", err)
+	}
+
+	if _, err := libs.Download(ctx, kronk.FmtLogger); err != nil {
+		return fmt.Errorf("unable to install llama.cpp: %w", err)
+	}
+
+	return nil
+}
+
+func (e *Engine) updateCatalog(ctx context.Context) error {
+	ctlg, err := catalog.New()
+	if err != nil {
+		return fmt.Errorf("unable to create catalog system: %w", err)
+	}
+
+	if err := ctlg.Download(ctx); err != nil {
+		return fmt.Errorf("unable to download catalog: %w", err)
+	}
+
+	return nil
+}
+
+func (e *Engine) loadModels(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
+	defer cancel()
+
+	mdls, err := models.New()
+	if err != nil {
+		return fmt.Errorf("unable to create models api: %w", err)
+	}
+
+	infoEmbed, err := mdls.Download(ctx, kronk.FmtLogger, e.modelEmbedURL, "")
+	if err != nil {
+		return fmt.Errorf("unable to install embed model: %w", err)
+	}
+
+	infoChat, err := mdls.Download(ctx, kronk.FmtLogger, e.modelChatURL, "")
+	if err != nil {
+		return fmt.Errorf("unable to install chat model: %w", err)
+	}
+
+	krnEmbed, err := e.newKronk(infoEmbed)
+	if err != nil {
+		return fmt.Errorf("unable to create embedding model: %w", err)
+	}
+
+	krnChat, err := e.newKronk(infoChat)
+	if err != nil {
+		return fmt.Errorf("unable to create chat model: %w", err)
+	}
+
+	e.krnEmbed = krnEmbed
+	e.krnChat = krnChat
+
+	if e.modelRerankURL != "" {
+		infoRerank, err := mdls.Download(ctx, kronk.FmtLogger, e.modelRerankURL, "")
+		if err != nil {
+			return fmt.Errorf("unable to install rerank model: %w", err)
+		}
+
+		krnRerank, err := e.newKronk(infoRerank)
+		if err != nil {
+			return fmt.Errorf("unable to create rerank model: %w", err)
+		}
+
+		e.krnRerank = krnRerank
+	}
+
+	return nil
 }
 
 func (e *Engine) newKronk(mp models.Path) (*kronk.Kronk, error) {

@@ -9,8 +9,8 @@ import (
 
 	"changeme/internal/business/enginebus"
 
-	"github.com/google/uuid"
 	"github.com/ardanlabs/kronk/sdk/kronk/model"
+	"github.com/google/uuid"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -64,13 +64,13 @@ type ChatErrorEvent struct {
 
 // QueryService is the Wails-facing service for RAG-augmented chat.
 type QueryService struct {
-	eng     *enginebus.Engine
+	eng     enginebus.ExtEngine
 	mu      sync.Mutex
 	history map[string][]HistoryMessage
 }
 
 // NewQueryService creates a QueryService backed by the given engine.
-func NewQueryService(eng *enginebus.Engine) *QueryService {
+func NewQueryService(eng enginebus.ExtEngine) *QueryService {
 	return &QueryService{
 		eng:     eng,
 		history: make(map[string][]HistoryMessage),

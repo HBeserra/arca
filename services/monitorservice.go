@@ -9,9 +9,9 @@ import (
 
 // AppStatus is the JSON-serialisable view of the system status.
 type AppStatus struct {
-	LoadedModels bool          `json:"loadedModels"`
-	Memory       MemoryStatus  `json:"memory"`
-	Cpu          CpuStatus     `json:"cpu"`
+	LoadedModels bool         `json:"loadedModels"`
+	Memory       MemoryStatus `json:"memory"`
+	Cpu          CpuStatus    `json:"cpu"`
 }
 
 // MemoryStatus carries memory usage info.
@@ -30,11 +30,11 @@ type CpuStatus struct {
 
 // MonitorService exposes system stats to the frontend.
 type MonitorService struct {
-	eng *enginebus.Engine
+	eng enginebus.ExtEngine
 }
 
 // NewMonitorService returns a new MonitorService.
-func NewMonitorService(eng *enginebus.Engine) *MonitorService {
+func NewMonitorService(eng enginebus.ExtEngine) *MonitorService {
 	return &MonitorService{eng: eng}
 }
 
