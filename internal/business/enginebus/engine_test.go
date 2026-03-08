@@ -75,6 +75,7 @@ func TestEngine_AskWithDocs(t *testing.T) {
 	}
 
 	storeMock.EXPECT().GetSession(gomock.Any(), sessionID).Return(session, nil)
+	storeMock.EXPECT().UpdateSession(gomock.Any(), gomock.Any()).Return(nil)
 
 	response, err := engine.Chat(ctx, enginebus.Question{
 		SessionID: sessionID,
@@ -114,6 +115,7 @@ func TestEngine_AskWithDocsStream(t *testing.T) {
 	}
 
 	storeMock.EXPECT().GetSession(gomock.Any(), sessionID).Return(session, nil)
+	storeMock.EXPECT().UpdateSession(gomock.Any(), gomock.Any()).Return(nil)
 
 	events, err := engine.ChatStream(ctx, enginebus.Question{
 		SessionID: sessionID,

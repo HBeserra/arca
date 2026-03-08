@@ -172,7 +172,7 @@ func (e *Engine) CreateSession(ctx context.Context, name string, opts ...Session
 		ID:            uuid.New(),
 		Name:          name,
 		CreatedAt:     time.Now(),
-		ChatHistory:   []model.D{},
+		ChatHistory:   []ChatMessage{},
 		BatchSize:     4096,
 		BatchsOverlap: 512,
 	}
@@ -404,28 +404,6 @@ func (e *Engine) SearchDocs(ctx context.Context, sessionID uuid.UUID, query stri
 	}
 
 	return fragments, nil
-}
-
-// ChatStream sends messages and returns a channel of streaming chat responses.
-func (e *Engine) ChatStream(ctx context.Context, msgs []model.D) (<-chan model.ChatResponse, error) {
-	if e.krnChat == nil {
-		err := e.Load(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("chat model not loaded and failed to load: %w", err)
-		}
-	}
-
-	d := model.D{
-		"messages":   msgs,
-		"max_tokens": 2048,
-	}
-
-	ch, err := e.krnChat.ChatStreaming(ctx, d)
-	if err != nil {
-		return nil, fmt.Errorf("chat stream: %w", err)
-	}
-
-	return ch, nil
 }
 
 // Rerank reranks documents by relevance to the query.

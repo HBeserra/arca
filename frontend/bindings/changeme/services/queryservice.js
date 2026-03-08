@@ -16,7 +16,7 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as $models from "./models.js";
 
 /**
- * ClearHistory clears the chat history for a session.
+ * ClearHistory removes all chat history for a session.
  * @param {string} sessionID
  * @returns {$CancellablePromise<void>}
  */
@@ -25,7 +25,7 @@ export function ClearHistory(sessionID) {
 }
 
 /**
- * GetHistory returns the chat history for a session.
+ * GetHistory returns the chat history for a session from the engine.
  * @param {string} sessionID
  * @returns {$CancellablePromise<$models.HistoryMessage[]>}
  */

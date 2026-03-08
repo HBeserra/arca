@@ -3,7 +3,6 @@ package enginebus
 import (
 	"time"
 
-	"github.com/ardanlabs/kronk/sdk/kronk/model"
 	"github.com/google/uuid"
 )
 
@@ -12,7 +11,7 @@ type Session struct {
 	ID          uuid.UUID
 	Name        string
 	CreatedAt   time.Time
-	ChatHistory []model.D
+	ChatHistory []ChatMessage
 	ContextUsed uint64
 
 	// Configurable parameters for embedding

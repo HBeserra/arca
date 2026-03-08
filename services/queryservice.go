@@ -4,12 +4,10 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"changeme/internal/business/enginebus"
 
-	"github.com/ardanlabs/kronk/sdk/kronk/model"
 	"github.com/google/uuid"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -23,7 +21,7 @@ type QueryConfig struct {
 	MaxTokens           int     `json:"maxTokens"`
 }
 
-// HistoryMessage is a single chat turn stored per session.
+// HistoryMessage is a single chat turn for the frontend.
 type HistoryMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -51,6 +49,12 @@ type ChatCitationEvent struct {
 	Citations []Citation `json:"citations"`
 }
 
+// ChatReasoningEvent carries a streaming reasoning/thinking token.
+type ChatReasoningEvent struct {
+	SessionID string `json:"sessionID"`
+	Token     string `json:"token"`
+}
+
 // ChatDoneEvent signals that streaming has finished.
 type ChatDoneEvent struct {
 	SessionID string `json:"sessionID"`
@@ -64,17 +68,12 @@ type ChatErrorEvent struct {
 
 // QueryService is the Wails-facing service for RAG-augmented chat.
 type QueryService struct {
-	eng     enginebus.ExtEngine
-	mu      sync.Mutex
-	history map[string][]HistoryMessage
+	eng enginebus.ExtEngine
 }
 
 // NewQueryService creates a QueryService backed by the given engine.
 func NewQueryService(eng enginebus.ExtEngine) *QueryService {
-	return &QueryService{
-		eng:     eng,
-		history: make(map[string][]HistoryMessage),
-	}
+	return &QueryService{eng: eng}
 }
 
 // Query performs a RAG-augmented chat turn and streams responses via events.
@@ -152,97 +151,86 @@ func (q *QueryService) query(sessionID, userMessage string, cfg QueryConfig) err
 		Citations: citations,
 	})
 
-	// 3. Build prompt.
 	systemPrompt := cfg.SystemPrompt
 	if systemPrompt == "" {
 		systemPrompt = "You are a helpful assistant. Answer questions using the provided context. If the context does not contain the answer, say so."
 	}
 
-	msgs := model.DocumentArray(
-		model.TextMessage(model.RoleSystem, systemPrompt),
-	)
-
-	if len(fragments) > 0 {
-		var contextBuilder string
-		for i, f := range fragments {
-			contextBuilder += fmt.Sprintf("[%d] %s\n\n", i+1, f.Text)
-		}
-		msgs = append(msgs,
-			model.TextMessage(model.RoleSystem, "Context:\n"+contextBuilder),
-		)
-	}
-
-	// Add history.
-	q.mu.Lock()
-	hist := q.history[sessionID]
-	q.mu.Unlock()
-
-	for _, hm := range hist {
-		msgs = append(msgs, model.TextMessage(hm.Role, hm.Content))
-	}
-
-	msgs = append(msgs, model.TextMessage(model.RoleUser, userMessage))
-
-	// 4. Stream response.
-	ch, err := q.eng.ChatStream(ctx, msgs)
+	// 3. Stream response — history is managed by the engine in the session store.
+	events, err := q.eng.ChatStream(ctx, enginebus.Question{
+		SessionID: sid,
+		Content:   userMessage,
+		Fragments: fragments,
+		System:    systemPrompt,
+	})
 	if err != nil {
 		return fmt.Errorf("query: chat stream: %w", err)
 	}
 
-	var fullResponse string
-
-	for resp := range ch {
-		if len(resp.Choice) == 0 {
-			continue
+	for event := range events {
+		if event.Err != nil {
+			return fmt.Errorf("query: model error: %w", event.Err)
 		}
 
-		switch resp.Choice[0].FinishReason() {
-		case model.FinishReasonError:
-			return fmt.Errorf("query: model error: %s", resp.Choice[0].Delta.Content)
+		if event.Answer != nil {
+			break
+		}
 
-		case model.FinishReasonStop:
-			goto done
+		if event.Reasoning != "" {
+			app.Event.Emit("chat:reasoning", ChatReasoningEvent{
+				SessionID: sessionID,
+				Token:     event.Reasoning,
+			})
+		}
 
-		default:
-			token := resp.Choice[0].Delta.Content
-			if token == "" {
-				continue
-			}
-
-			fullResponse += token
+		if event.Token != "" {
 			app.Event.Emit("chat:token", ChatTokenEvent{
 				SessionID: sessionID,
-				Token:     token,
+				Token:     event.Token,
 			})
 		}
 	}
-
-done:
-	// Update history.
-	q.mu.Lock()
-	q.history[sessionID] = append(q.history[sessionID],
-		HistoryMessage{Role: model.RoleUser, Content: userMessage},
-		HistoryMessage{Role: model.RoleAssistant, Content: fullResponse},
-	)
-	q.mu.Unlock()
 
 	app.Event.Emit("chat:done", ChatDoneEvent{SessionID: sessionID})
 
 	return nil
 }
 
-// GetHistory returns the chat history for a session.
+// GetHistory returns the chat history for a session from the engine.
 func (q *QueryService) GetHistory(sessionID string) []HistoryMessage {
-	q.mu.Lock()
-	defer q.mu.Unlock()
+	sid, err := uuid.Parse(sessionID)
+	if err != nil {
+		return nil
+	}
 
-	return q.history[sessionID]
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	session, err := q.eng.GetSession(ctx, sid)
+	if err != nil {
+		return nil
+	}
+
+	history := make([]HistoryMessage, len(session.ChatHistory))
+	for i, hm := range session.ChatHistory {
+		history[i] = HistoryMessage{Role: hm.Role, Content: hm.Content}
+	}
+
+	return history
 }
 
-// ClearHistory clears the chat history for a session.
+// ClearHistory removes all chat history for a session.
 func (q *QueryService) ClearHistory(sessionID string) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
+	sid, err := uuid.Parse(sessionID)
+	if err != nil {
+		return
+	}
 
-	delete(q.history, sessionID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := q.eng.ClearChatHistory(ctx, sid); err != nil {
+		// non-fatal: log via slog if needed
+		_ = err
+	}
 }

@@ -38,6 +38,14 @@ export function ChatPanel({
 
   // Wire streaming events.
   useEffect(() => {
+    const offReasoning = Events.On("chat:reasoning", (e: { data: { sessionID: string; token: string } }) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.isStreaming ? { ...m, reasoning: (m.reasoning ?? "") + e.data.token } : m
+        )
+      );
+    });
+
     const offToken = Events.On("chat:token", (e: { data: ChatTokenPayload }) => {
       setMessages((prev) =>
         prev.map((m) =>
@@ -72,6 +80,7 @@ export function ChatPanel({
     });
 
     return () => {
+      offReasoning();
       offToken();
       offCitation();
       offDone();

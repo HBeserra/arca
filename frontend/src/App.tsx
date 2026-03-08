@@ -7,6 +7,7 @@ import { StatusBar } from "@/components/StatusBar";
 import { cn } from "@/lib/utils";
 import type { Message, AppConfig, Session } from "@/lib/types";
 import * as IndexService from "../bindings/changeme/services/indexservice";
+import * as QueryService from "../bindings/changeme/services/queryservice";
 
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -73,7 +74,6 @@ export default function App() {
     setSessions((prev) => prev.filter((s) => s.id !== id));
     if (activeSessionID === id) {
       setActiveSessionID(sessions.find((s) => s.id !== id)?.id ?? null);
-      setMessages([]);
     }
   }
 
@@ -81,9 +81,30 @@ export default function App() {
     setSessions((prev) => prev.map((s) => (s.id === sess.id ? sess : s)));
   }
 
+  // Load persisted chat history whenever the active session changes.
+  useEffect(() => {
+    if (!activeSessionID) {
+      setMessages([]);
+      return;
+    }
+    QueryService.GetHistory(activeSessionID).then((hist) => {
+      if (!hist || hist.length === 0) {
+        setMessages([]);
+        return;
+      }
+      setMessages(
+        hist.map((hm, i) => ({
+          id: `hist-${i}`,
+          role: hm.role as "user" | "assistant",
+          content: hm.content,
+          timestamp: new Date(),
+        }))
+      );
+    });
+  }, [activeSessionID]);
+
   function handleSessionSelect(id: string) {
     setActiveSessionID(id);
-    setMessages([]); // clear chat when switching sessions
   }
 
   return (

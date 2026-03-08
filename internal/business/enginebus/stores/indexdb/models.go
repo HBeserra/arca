@@ -9,7 +9,6 @@ import (
 	"changeme/internal/business/enginebus"
 	"changeme/internal/business/types/status"
 
-	"github.com/ardanlabs/kronk/sdk/kronk/model"
 	"github.com/google/uuid"
 )
 
@@ -52,7 +51,7 @@ type dbFragment struct {
 func toDBSession(s enginebus.Session) (dbSession, error) {
 	history := s.ChatHistory
 	if history == nil {
-		history = []model.D{}
+		history = []enginebus.ChatMessage{}
 	}
 	b, err := json.Marshal(history)
 	if err != nil {
@@ -107,7 +106,7 @@ func toSession(d dbSession) (enginebus.Session, error) {
 	if err != nil {
 		return enginebus.Session{}, fmt.Errorf("re-marshal chat_history: %w", err)
 	}
-	var history []model.D
+	var history []enginebus.ChatMessage
 	if err := json.Unmarshal(b, &history); err != nil {
 		return enginebus.Session{}, fmt.Errorf("unmarshal chat_history: %w", err)
 	}

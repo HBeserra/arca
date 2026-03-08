@@ -388,7 +388,7 @@ export class DocumentInfo {
 }
 
 /**
- * HistoryMessage is a single chat turn stored per session.
+ * HistoryMessage is a single chat turn for the frontend.
  */
 export class HistoryMessage {
     /**

@@ -222,13 +222,20 @@ func (s *IndexService) IndexPaths(sessionID string, paths []string) error {
 				continue
 			}
 			if info.IsDir() {
+				if s.ignoreFolder(p) {
+					continue
+				}
 				s.indexFolder(ctx, sid, sessionID, p)
 			} else {
+				if s.ignoreFile(p) {
+					continue
+				}
+
 				s.indexFile(ctx, sid, sessionID, p, nil)
 			}
 
+			application.Get().Event.Emit("index:complete", IndexCompleteEvent{SessionID: sessionID})
 		}
-		application.Get().Event.Emit("index:complete", IndexCompleteEvent{SessionID: sessionID})
 		_ = beeep.Notify("Arca — Indexing complete", fmt.Sprintf("All documents have been indexed into session %s.", sessionID), s.appIcon)
 
 	}()
@@ -339,6 +346,31 @@ func (s *IndexService) indexFile(ctx context.Context, sid uuid.UUID, sessionID, 
 	}
 
 	emit("done", 100)
+}
+
+func (s *IndexService) ignoreFolder(path string) bool {
+	base := filepath.Base(path)
+	// Ignore common VCS and OS folders.
+	ignored := []string{".git", ".svn", ".hg", "node_modules", "__pycache__", "venv", "env", "tmp", "temp"}
+	for _, ig := range ignored {
+		if base == ig {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *IndexService) ignoreFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	// Ignore unsupported file types.
+	if !supportedExts[ext] {
+		return true
+	}
+	// Ignore hidden files.
+	if strings.HasPrefix(filepath.Base(path), ".") {
+		return true
+	}
+	return false
 }
 
 // ─── helpers ───────────────────────────────────────────────────────────────

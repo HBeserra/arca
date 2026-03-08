@@ -13,6 +13,7 @@ export interface Message {
   id: string;
   role: MessageRole;
   content: string;
+  reasoning?: string;
   citations?: Citation[];
   isStreaming?: boolean;
   timestamp: Date;

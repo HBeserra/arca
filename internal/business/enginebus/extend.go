@@ -3,7 +3,6 @@ package enginebus
 import (
 	"context"
 
-	"github.com/ardanlabs/kronk/sdk/kronk/model"
 	"github.com/google/uuid"
 )
 
@@ -18,14 +17,16 @@ type (
 		ListSessions(ctx context.Context) ([]Session, error)
 		RenameSession(context.Context, uuid.UUID, string) error
 		DeleteSession(ctx context.Context, id uuid.UUID) error
+		GetSession(ctx context.Context, sessionID uuid.UUID) (Session, error)
 		CreateFolder(ctx context.Context, sessionID uuid.UUID, name, path string, parentID *uuid.UUID) (Document, error)
 		AddDocumentText(ctx context.Context, input AddDocumentInput) error
 		AddDocumentTextStream(ctx context.Context, doc AddDocumentStreamInput) error
 		SearchDocs(ctx context.Context, sessionID uuid.UUID, query string) ([]Fragment, error)
-		ChatStream(ctx context.Context, msgs []model.D) (<-chan model.ChatResponse, error)
+		Chat(ctx context.Context, q Question) (Answer, error)
+		ChatStream(ctx context.Context, q Question) (<-chan ChatEvent, error)
+		ClearChatHistory(ctx context.Context, sessionID uuid.UUID) error
 		Rerank(ctx context.Context, query string, docs []string) ([]RankedDoc, error)
 		Summarize(ctx context.Context, text string) (string, error)
-		GetSession(ctx context.Context, sessionID uuid.UUID) (Session, error)
 		ListDocuments(ctx context.Context, sessionID uuid.UUID) ([]Document, error)
 	}
 )
