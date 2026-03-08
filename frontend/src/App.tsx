@@ -4,6 +4,7 @@ import { ChatPanel } from "@/components/ChatPanel";
 import { KnowledgeBasePanel } from "@/components/KnowledgeBasePanel";
 import { ConfigPanel } from "@/components/ConfigPanel";
 import { StatusBar } from "@/components/StatusBar";
+import { cn } from "@/lib/utils";
 import type { Message, AppConfig, Session } from "@/lib/types";
 import * as IndexService from "../bindings/changeme/services/indexservice";
 
@@ -12,6 +13,7 @@ export default function App() {
   const [activeSessionID, setActiveSessionID] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
   const [config, setConfig] = useState<AppConfig>({
     model: {
       model: "gpt-oss-20b",
@@ -97,15 +99,22 @@ export default function App() {
               setIsStreaming={setIsStreaming}
               activeSession={activeSession}
               queryConfig={queryConfig}
+              onToggleConfig={() => setConfigOpen((o) => !o)}
+              configOpen={configOpen}
             />
           </div>
 
-          <div className="w-72 flex-shrink-0 border-l flex flex-col overflow-hidden">
+          <div
+            className={cn(
+              "flex-shrink-0 border-l flex flex-col overflow-hidden transition-all duration-200",
+              configOpen ? "w-72" : "w-0 border-l-0"
+            )}
+          >
             <ConfigPanel config={config} onChange={setConfig} />
           </div>
         </div>
 
-        <StatusBar isRunning={isStreaming} model={config.model.model} />
+        <StatusBar model={config.model.model} />
       </div>
     </TooltipProvider>
   );

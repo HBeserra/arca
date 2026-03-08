@@ -1,6 +1,7 @@
 package indexdb
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -28,6 +29,8 @@ type dbSession struct {
 type dbDocument struct {
 	ID          string
 	SessionID   string
+	ParentID    sql.NullString
+	Type        string
 	Name        string
 	Path        string
 	ContentType string
@@ -70,9 +73,19 @@ func toDBSession(s enginebus.Session) (dbSession, error) {
 }
 
 func toDBDocument(d enginebus.Document) dbDocument {
+	var parentID sql.NullString
+	if d.ParentID != nil {
+		parentID = sql.NullString{String: d.ParentID.String(), Valid: true}
+	}
+	docType := d.Type
+	if docType == "" {
+		docType = "file"
+	}
 	return dbDocument{
 		ID:          d.ID.String(),
 		SessionID:   d.SessionID.String(),
+		ParentID:    parentID,
+		Type:        docType,
 		Name:        d.Name,
 		Path:        d.Path,
 		ContentType: d.ContentType,
@@ -122,9 +135,23 @@ func toDocument(d dbDocument) (enginebus.Document, error) {
 	if err != nil {
 		return enginebus.Document{}, fmt.Errorf("parse status: %w", err)
 	}
+	var parentID *uuid.UUID
+	if d.ParentID.Valid && d.ParentID.String != "" {
+		pid, err := uuid.Parse(d.ParentID.String)
+		if err != nil {
+			return enginebus.Document{}, fmt.Errorf("parse parent id: %w", err)
+		}
+		parentID = &pid
+	}
+	docType := d.Type
+	if docType == "" {
+		docType = "file"
+	}
 	return enginebus.Document{
 		ID:          id,
 		SessionID:   sid,
+		ParentID:    parentID,
+		Type:        docType,
 		Name:        d.Name,
 		Path:        d.Path,
 		ContentType: d.ContentType,

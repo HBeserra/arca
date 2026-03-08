@@ -108,11 +108,16 @@ func (s *Store) init() error {
 		`CREATE TABLE IF NOT EXISTS documents (
 			id           TEXT    PRIMARY KEY,
 			session_id   TEXT    NOT NULL,
+			parent_id    TEXT,
+			type         VARCHAR NOT NULL DEFAULT 'file',
 			name         VARCHAR NOT NULL,
 			path         VARCHAR NOT NULL,
 			content_type VARCHAR NOT NULL,
 			status       VARCHAR NOT NULL DEFAULT 'waiting'
 		);`,
+		// Migrate existing tables that predate parent_id/type columns.
+		`ALTER TABLE documents ADD COLUMN IF NOT EXISTS parent_id TEXT;`,
+		`ALTER TABLE documents ADD COLUMN IF NOT EXISTS type VARCHAR DEFAULT 'file';`,
 		`CREATE SEQUENCE IF NOT EXISTS chunk_id_seq START 1;`,
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS chunks (
 			id          INTEGER PRIMARY KEY DEFAULT nextval('chunk_id_seq'),
@@ -194,9 +199,9 @@ func (s *Store) UpdateSession(ctx context.Context, session enginebus.Session) er
 
 	_, err = s.db.ExecContext(ctx,
 		`UPDATE sessions
-		 SET chat_history = $2, batch_size = $3, batch_overlap = $4
+		 SET chat_history = $2, batch_size = $3, batch_overlap = $4, name = $5
 		 WHERE id = $1`,
-		m.ID, m.ChatHistory, m.BatchSize, m.BatchOverlap,
+		m.ID, m.ChatHistory, m.BatchSize, m.BatchOverlap, m.Name,
 	)
 	if err != nil {
 		return fmt.Errorf("update session: %w", err)
@@ -247,9 +252,9 @@ func (s *Store) ListSessions(ctx context.Context) ([]enginebus.Session, error) {
 func (s *Store) CreateDocument(ctx context.Context, doc enginebus.Document) error {
 	m := toDBDocument(doc)
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO documents (id, session_id, name, path, content_type, status)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		m.ID, m.SessionID, m.Name, m.Path, m.ContentType, m.Status,
+		`INSERT INTO documents (id, session_id, parent_id, type, name, path, content_type, status)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		m.ID, m.SessionID, m.ParentID, m.Type, m.Name, m.Path, m.ContentType, m.Status,
 	)
 	if err != nil {
 		return fmt.Errorf("create document: %w", err)
@@ -273,7 +278,7 @@ func (s *Store) UpdateDocument(ctx context.Context, doc enginebus.Document) erro
 
 func (s *Store) ListDocuments(ctx context.Context, sessionID uuid.UUID) ([]enginebus.Document, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, session_id, name, path, content_type, status
+		`SELECT id, session_id, parent_id, type, name, path, content_type, status
 		 FROM documents WHERE session_id = $1`,
 		sessionID.String(),
 	)
@@ -285,7 +290,7 @@ func (s *Store) ListDocuments(ctx context.Context, sessionID uuid.UUID) ([]engin
 	var docs []enginebus.Document
 	for rows.Next() {
 		var m dbDocument
-		if err := rows.Scan(&m.ID, &m.SessionID, &m.Name, &m.Path, &m.ContentType, &m.Status); err != nil {
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.ParentID, &m.Type, &m.Name, &m.Path, &m.ContentType, &m.Status); err != nil {
 			return nil, fmt.Errorf("scan document: %w", err)
 		}
 		doc, err := toDocument(m)

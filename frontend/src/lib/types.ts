@@ -23,6 +23,8 @@ export type DocumentStatus = "waiting" | "processing" | "completed" | "error";
 // Session types (matching Wails bindings / SessionInfo / DocumentInfo)
 export interface SessionDocument {
   id: string;
+  parent_id: string;   // empty string = root-level
+  type: "file" | "folder";
   name: string;
   path: string;
   content_type: string;

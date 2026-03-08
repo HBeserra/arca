@@ -2,7 +2,7 @@
 set -e
 
 # Build configuration
-APP_NAME="kronk-gui"
+APP_NAME="arca"
 BUNDLE_ID="com.example.kronkgui"
 VERSION="0.1.0"
 BUILD_NUMBER="0.1.0"

@@ -1,13 +1,13 @@
 [Desktop Entry]
 Version=1.0
 Name=My Product
-Comment=A kronk-gui application
+Comment=A arca application
 # The Exec line includes %u to pass the URL to the application
-Exec=/usr/local/bin/kronk-gui %u
+Exec=/usr/local/bin/arca %u
 Terminal=false
 Type=Application
-Icon=kronk-gui
+Icon=arca
 Categories=Utility;
-StartupWMClass=kronk-gui
+StartupWMClass=arca
 
  

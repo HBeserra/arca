@@ -9,6 +9,8 @@ import (
 type Document struct {
 	ID          uuid.UUID
 	SessionID   uuid.UUID
+	ParentID    *uuid.UUID // nil = root-level document
+	Type        string     // "file" or "folder"
 	Name        string
 	Path        string
 	ContentType string

@@ -36,6 +36,13 @@ export function DeleteSession(id) {
 }
 
 /**
+ * @returns {$CancellablePromise<void>}
+ */
+export function Eject() {
+    return $Call.ByID(977733762);
+}
+
+/**
  * GetSession returns a single session by ID with its documents.
  * @param {string} id
  * @returns {$CancellablePromise<$models.SessionInfo | null>}
@@ -48,6 +55,8 @@ export function GetSession(id) {
 
 /**
  * IndexPaths triggers ingestion of the given paths into the session (async).
+ * Directories are represented as a single folder document in the sidebar;
+ * their files are indexed as children. Plain files are indexed at the root level.
  * @param {string} sessionID
  * @param {string[]} paths
  * @returns {$CancellablePromise<void>}
@@ -90,6 +99,16 @@ export function PickFiles() {
  */
 export function PickFolder() {
     return $Call.ByID(530372400);
+}
+
+/**
+ * RenameSession updates the name of a session.
+ * @param {string} id
+ * @param {string} name
+ * @returns {$CancellablePromise<void>}
+ */
+export function RenameSession(id, name) {
+    return $Call.ByID(1740801961, id, name);
 }
 
 // Private type creation functions

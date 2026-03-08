@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import { Send, Trash2 } from "lucide-react";
+import { Send, Trash2, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -15,6 +15,8 @@ interface ChatPanelProps {
   setIsStreaming: React.Dispatch<React.SetStateAction<boolean>>;
   activeSession: Session | null;
   queryConfig: { topK: number; similarityThreshold: number; useReranker: boolean; systemPrompt: string; maxTokens: number };
+  onToggleConfig: () => void;
+  configOpen: boolean;
 }
 
 export function ChatPanel({
@@ -24,6 +26,8 @@ export function ChatPanel({
   setIsStreaming,
   activeSession,
   queryConfig,
+  onToggleConfig,
+  configOpen,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -158,9 +162,18 @@ export function ChatPanel({
           <h2 className="font-semibold text-sm">Chat</h2>
           <p className="text-xs text-muted-foreground">{sessionName} · Cmd+Enter to send</p>
         </div>
-        <div style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+        <div className="flex items-center gap-1" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
           <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={handleClearHistory} title="Clear history">
             <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className={`h-7 w-7 p-0 ${configOpen ? "text-primary" : ""}`}
+            onClick={onToggleConfig}
+            title={configOpen ? "Hide config" : "Show config"}
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>

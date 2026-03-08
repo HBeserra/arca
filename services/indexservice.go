@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"changeme/internal/business/enginebus"
 
+	"github.com/gen2brain/beeep"
 	"github.com/google/uuid"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -47,6 +49,8 @@ type SessionInfo struct {
 // DocumentInfo is the JSON-serialisable view of a document.
 type DocumentInfo struct {
 	ID          string `json:"id"`
+	ParentID    string `json:"parent_id"` // empty string = root-level
+	Type        string `json:"type"`      // "file" or "folder"
 	Name        string `json:"name"`
 	Path        string `json:"path"`
 	ContentType string `json:"content_type"`
@@ -66,13 +70,21 @@ var supportedExts = map[string]bool{
 
 // IndexService is the Wails-facing service for session and ingestion management.
 type IndexService struct {
-	eng *enginebus.Engine
-	mu  sync.RWMutex
+	eng     *enginebus.Engine
+	mu      sync.RWMutex
+	appIcon []byte
 }
 
 // NewIndexService returns a new IndexService.
-func NewIndexService(eng *enginebus.Engine) *IndexService {
-	return &IndexService{eng: eng}
+func NewIndexService(eng *enginebus.Engine, appIcon []byte) *IndexService {
+	return &IndexService{eng: eng, appIcon: appIcon}
+}
+
+func (s *IndexService) Eject() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	return s.eng.Eject(ctx)
 }
 
 // CreateSession creates and persists a new named session.
@@ -125,6 +137,22 @@ func (s *IndexService) GetSession(id string) (*SessionInfo, error) {
 	return &info, nil
 }
 
+// RenameSession updates the name of a session.
+func (s *IndexService) RenameSession(id string, name string) error {
+	ctx := context.Background()
+
+	sid, err := uuid.Parse(id)
+	if err != nil {
+		return fmt.Errorf("index: invalid session id: %w", err)
+	}
+
+	err = s.eng.RenameSession(ctx, sid, name)
+	if err != nil {
+		return fmt.Errorf("index: rename session: %w", err)
+	}
+	return nil
+}
+
 // DeleteSession removes a session.
 func (s *IndexService) DeleteSession(id string) error {
 	ctx := context.Background()
@@ -169,6 +197,8 @@ func (s *IndexService) PickDisk() (string, error) {
 }
 
 // IndexPaths triggers ingestion of the given paths into the session (async).
+// Directories are represented as a single folder document in the sidebar;
+// their files are indexed as children. Plain files are indexed at the root level.
 func (s *IndexService) IndexPaths(sessionID string, paths []string) error {
 	sid, err := uuid.Parse(sessionID)
 	if err != nil {
@@ -177,89 +207,138 @@ func (s *IndexService) IndexPaths(sessionID string, paths []string) error {
 
 	go func() {
 		ctx := context.Background()
-		app := application.Get()
 
-		files, err := collectFiles(paths)
-		if err != nil {
-			app.Event.Emit("index:error", IndexErrorEvent{
-				SessionID: sessionID,
-				DocName:   "batch",
-				Error:     err.Error(),
-			})
-			return
-		}
-
-		for _, path := range files {
-			if err := ctx.Err(); err != nil {
+		for _, p := range paths {
+			if ctx.Err() != nil {
 				return
 			}
-
-			name := filepath.Base(path)
-
-			app.Event.Emit("index:progress", IndexProgressEvent{
-				SessionID: sessionID,
-				DocName:   name,
-				Stage:     "reading",
-				Pct:       5,
-			})
-
-			raw, err := os.ReadFile(path)
+			info, err := os.Stat(p)
 			if err != nil {
-				app.Event.Emit("index:error", IndexErrorEvent{
+				application.Get().Event.Emit("index:error", IndexErrorEvent{
 					SessionID: sessionID,
-					DocName:   name,
-					Error:     fmt.Sprintf("read: %v", err),
-				})
-				continue
-			}
-
-			text := string(raw)
-			if !utf8.ValidString(text) {
-				app.Event.Emit("index:error", IndexErrorEvent{
-					SessionID: sessionID,
-					DocName:   name,
-					Error:     "file is not valid UTF-8 text",
-				})
-				continue
-			}
-
-			app.Event.Emit("index:progress", IndexProgressEvent{
-				SessionID: sessionID,
-				DocName:   name,
-				Stage:     "embedding",
-				Pct:       20,
-			})
-
-			ext := strings.ToLower(filepath.Ext(path))
-			input := enginebus.AddDocumentInput{
-				SessionID:   sid,
-				Name:        name,
-				Path:        path,
-				Text:        text,
-				ContentType: ext,
-			}
-
-			if err := s.eng.AddDocumentText(ctx, input); err != nil {
-				app.Event.Emit("index:error", IndexErrorEvent{
-					SessionID: sessionID,
-					DocName:   name,
+					DocName:   filepath.Base(p),
 					Error:     err.Error(),
 				})
 				continue
 			}
+			if info.IsDir() {
+				s.indexFolder(ctx, sid, sessionID, p)
+			} else {
+				s.indexFile(ctx, sid, sessionID, p, nil)
+			}
 
-			app.Event.Emit("index:progress", IndexProgressEvent{
-				SessionID: sessionID,
-				DocName:   name,
-				Stage:     "done",
-				Pct:       100,
-			})
 		}
+		application.Get().Event.Emit("index:complete", IndexCompleteEvent{SessionID: sessionID})
+		_ = beeep.Notify("Arca — Indexing complete", fmt.Sprintf("All documents have been indexed into session %s.", sessionID), s.appIcon)
 
-		app.Event.Emit("index:complete", IndexCompleteEvent{SessionID: sessionID})
 	}()
 
 	return nil
+}
+
+// indexFolder creates a folder document tree mirroring the directory structure,
+// then indexes each supported file under its immediate parent folder.
+func (s *IndexService) indexFolder(ctx context.Context, sid uuid.UUID, sessionID, folderPath string) {
+	// folderIDs maps an absolute directory path → its document ID so that
+	// sub-folders and files can reference the correct parent.
+	folderIDs := map[string]uuid.UUID{}
+
+	// Create the root folder first.
+	root, err := s.eng.CreateFolder(ctx, sid, filepath.Base(folderPath), folderPath, nil)
+	if err != nil {
+		application.Get().Event.Emit("index:error", IndexErrorEvent{
+			SessionID: sessionID,
+			DocName:   filepath.Base(folderPath),
+			Error:     err.Error(),
+		})
+		return
+	}
+	folderIDs[folderPath] = root.ID
+
+	filepath.Walk(folderPath, func(path string, fi os.FileInfo, err error) error {
+		if err != nil || path == folderPath {
+			return nil
+		}
+
+		parentID := folderIDs[filepath.Dir(path)]
+
+		if fi.IsDir() {
+			sub, err := s.eng.CreateFolder(ctx, sid, fi.Name(), path, &parentID)
+			if err != nil {
+				application.Get().Event.Emit("index:error", IndexErrorEvent{
+					SessionID: sessionID,
+					DocName:   fi.Name(),
+					Error:     err.Error(),
+				})
+				return nil
+			}
+			folderIDs[path] = sub.ID
+		} else if supportedExts[strings.ToLower(filepath.Ext(path))] {
+			s.indexFile(ctx, sid, sessionID, path, &parentID)
+		}
+		return nil
+	})
+}
+
+// indexFile reads, validates, embeds, and stores a single file document.
+func (s *IndexService) indexFile(ctx context.Context, sid uuid.UUID, sessionID, path string, parentID *uuid.UUID) {
+	name := filepath.Base(path)
+	docID := uuid.New()
+
+	emit := func(stage string, pct int) {
+		application.Get().Event.Emit("index:progress", IndexProgressEvent{
+			SessionID: sessionID,
+			DocID:     docID.String(),
+			DocName:   name,
+			Stage:     stage,
+			Pct:       pct,
+		})
+	}
+
+	emit("reading", 5)
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		application.Get().Event.Emit("index:error", IndexErrorEvent{
+			SessionID: sessionID,
+			DocName:   name,
+			Error:     fmt.Sprintf("read: %v", err),
+		})
+		return
+	}
+
+	text := string(raw)
+	if !utf8.ValidString(text) {
+		application.Get().Event.Emit("index:error", IndexErrorEvent{
+			SessionID: sessionID,
+			DocName:   name,
+			Error:     "file is not valid UTF-8 text",
+		})
+		return
+	}
+
+	emit("embedding", 20)
+
+	input := enginebus.AddDocumentInput{
+		ID:          docID,
+		SessionID:   sid,
+		ParentID:    parentID,
+		Name:        name,
+		Path:        path,
+		Text:        text,
+		ContentType: strings.ToLower(filepath.Ext(path)),
+	}
+
+	if err := s.eng.AddDocumentText(ctx, input); err != nil {
+		application.Get().Event.Emit("index:error", IndexErrorEvent{
+			SessionID: sessionID,
+			DocName:   name,
+			Error:     err.Error(),
+		})
+		return
+	}
+
+	emit("done", 100)
 }
 
 // ─── helpers ───────────────────────────────────────────────────────────────
@@ -267,8 +346,18 @@ func (s *IndexService) IndexPaths(sessionID string, paths []string) error {
 func sessionToInfo(sess enginebus.Session, docs []enginebus.Document) SessionInfo {
 	docInfos := make([]DocumentInfo, 0, len(docs))
 	for _, d := range docs {
+		parentID := ""
+		if d.ParentID != nil {
+			parentID = d.ParentID.String()
+		}
+		docType := d.Type
+		if docType == "" {
+			docType = "file"
+		}
 		docInfos = append(docInfos, DocumentInfo{
 			ID:          d.ID.String(),
+			ParentID:    parentID,
+			Type:        docType,
 			Name:        d.Name,
 			Path:        d.Path,
 			ContentType: d.ContentType,
@@ -282,34 +371,4 @@ func sessionToInfo(sess enginebus.Session, docs []enginebus.Document) SessionInf
 		CreatedAt: sess.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		Documents: docInfos,
 	}
-}
-
-func collectFiles(paths []string) ([]string, error) {
-	var files []string
-
-	for _, p := range paths {
-		info, err := os.Stat(p)
-		if err != nil {
-			return nil, err
-		}
-
-		if info.IsDir() {
-			err := filepath.Walk(p, func(path string, fi os.FileInfo, err error) error {
-				if err != nil {
-					return nil
-				}
-				if !fi.IsDir() && supportedExts[strings.ToLower(filepath.Ext(path))] {
-					files = append(files, path)
-				}
-				return nil
-			})
-			if err != nil {
-				return nil, err
-			}
-		} else if supportedExts[strings.ToLower(filepath.Ext(p))] {
-			files = append(files, p)
-		}
-	}
-
-	return files, nil
 }

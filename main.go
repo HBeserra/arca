@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"embed"
-	_ "embed"
 	"fmt"
 	"log"
 	"log/slog"
@@ -15,6 +14,7 @@ import (
 	_ "github.com/marcboeker/go-duckdb/v2"
 
 	"changeme/internal/business/enginebus"
+	"changeme/internal/business/enginebus/monitor"
 	"changeme/internal/business/enginebus/stores/indexdb"
 	"changeme/services"
 
@@ -23,6 +23,9 @@ import (
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+//go:embed build/appicon.png
+var appIcon []byte
 
 const (
 	embedModelURL  = "ggml-org/embeddinggemma-300m-qat-q8_0-GGUF/embeddinggemma-300m-qat-Q8_0.gguf"
@@ -55,10 +58,16 @@ func main() {
 		log.Fatalf("indexdb init: %v", err)
 	}
 
+	appCtx, appCancel := context.WithCancel(context.Background())
+	_ = appCancel // cancelled when app exits
+
+	mon := monitor.New(appCtx, logger, 2*time.Second)
+
 	eng, err := enginebus.New(logger, store,
 		enginebus.WithEmbedModel(embedModelURL),
 		enginebus.WithRerankModel(rerankModelURL),
 		enginebus.WithChatModel(chatModelURL),
+		enginebus.WithMonitor(mon),
 	)
 	if err != nil {
 		log.Fatalf("engine init: %v", err)
@@ -74,8 +83,9 @@ func main() {
 		}
 	}()
 
-	idxSvc := services.NewIndexService(eng)
+	idxSvc := services.NewIndexService(eng, appIcon)
 	qrySvc := services.NewQueryService(eng)
+	monSvc := services.NewMonitorService(eng)
 
 	app := application.New(application.Options{
 		Name:        "Arca",
@@ -83,6 +93,7 @@ func main() {
 		Services: []application.Service{
 			application.NewService(idxSvc),
 			application.NewService(qrySvc),
+			application.NewService(monSvc),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

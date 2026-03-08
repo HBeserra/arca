@@ -7,6 +7,59 @@
 import { Create as $Create } from "@wailsio/runtime";
 
 /**
+ * AppStatus is the JSON-serialisable view of the system status.
+ */
+export class AppStatus {
+    /**
+     * Creates a new AppStatus instance.
+     * @param {Partial<AppStatus>} [$$source = {}] - The source object to create the AppStatus.
+     */
+    constructor($$source = {}) {
+        if (!("loadedModels" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["loadedModels"] = false;
+        }
+        if (!("memory" in $$source)) {
+            /**
+             * @member
+             * @type {MemoryStatus}
+             */
+            this["memory"] = (new MemoryStatus());
+        }
+        if (!("cpu" in $$source)) {
+            /**
+             * @member
+             * @type {CpuStatus}
+             */
+            this["cpu"] = (new CpuStatus());
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AppStatus instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {AppStatus}
+     */
+    static createFrom($$source = {}) {
+        const $$createField1_0 = $$createType0;
+        const $$createField2_0 = $$createType1;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("memory" in $$parsedSource) {
+            $$parsedSource["memory"] = $$createField1_0($$parsedSource["memory"]);
+        }
+        if ("cpu" in $$parsedSource) {
+            $$parsedSource["cpu"] = $$createField2_0($$parsedSource["cpu"]);
+        }
+        return new AppStatus(/** @type {Partial<AppStatus>} */($$parsedSource));
+    }
+}
+
+/**
  * ChatCitationEvent carries source citations once retrieval is done.
  */
 export class ChatCitationEvent {
@@ -39,7 +92,7 @@ export class ChatCitationEvent {
      * @returns {ChatCitationEvent}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType1;
+        const $$createField1_0 = $$createType3;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("citations" in $$parsedSource) {
             $$parsedSource["citations"] = $$createField1_0($$parsedSource["citations"]);
@@ -222,6 +275,44 @@ export class Citation {
 }
 
 /**
+ * CpuStatus carries CPU usage info.
+ */
+export class CpuStatus {
+    /**
+     * Creates a new CpuStatus instance.
+     * @param {Partial<CpuStatus>} [$$source = {}] - The source object to create the CpuStatus.
+     */
+    constructor($$source = {}) {
+        if (!("processUsagePct" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["processUsagePct"] = 0;
+        }
+        if (!("systemUsagePct" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["systemUsagePct"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CpuStatus instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {CpuStatus}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new CpuStatus(/** @type {Partial<CpuStatus>} */($$parsedSource));
+    }
+}
+
+/**
  * DocumentInfo is the JSON-serialisable view of a document.
  */
 export class DocumentInfo {
@@ -236,6 +327,22 @@ export class DocumentInfo {
              * @type {string}
              */
             this["id"] = "";
+        }
+        if (!("parent_id" in $$source)) {
+            /**
+             * empty string = root-level
+             * @member
+             * @type {string}
+             */
+            this["parent_id"] = "";
+        }
+        if (!("type" in $$source)) {
+            /**
+             * "file" or "folder"
+             * @member
+             * @type {string}
+             */
+            this["type"] = "";
         }
         if (!("name" in $$source)) {
             /**
@@ -454,6 +561,58 @@ export class IndexProgressEvent {
 }
 
 /**
+ * MemoryStatus carries memory usage info.
+ */
+export class MemoryStatus {
+    /**
+     * Creates a new MemoryStatus instance.
+     * @param {Partial<MemoryStatus>} [$$source = {}] - The source object to create the MemoryStatus.
+     */
+    constructor($$source = {}) {
+        if (!("totalBytes" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["totalBytes"] = 0;
+        }
+        if (!("usedBytes" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["usedBytes"] = 0;
+        }
+        if (!("availableBytes" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["availableBytes"] = 0;
+        }
+        if (!("usedPct" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["usedPct"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new MemoryStatus instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {MemoryStatus}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new MemoryStatus(/** @type {Partial<MemoryStatus>} */($$parsedSource));
+    }
+}
+
+/**
  * QueryConfig carries RAG and model parameters from the frontend.
  */
 export class QueryConfig {
@@ -559,7 +718,7 @@ export class SessionInfo {
      * @returns {SessionInfo}
      */
     static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType3;
+        const $$createField3_0 = $$createType5;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("documents" in $$parsedSource) {
             $$parsedSource["documents"] = $$createField3_0($$parsedSource["documents"]);
@@ -569,7 +728,9 @@ export class SessionInfo {
 }
 
 // Private type creation functions
-const $$createType0 = Citation.createFrom;
-const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = DocumentInfo.createFrom;
+const $$createType0 = MemoryStatus.createFrom;
+const $$createType1 = CpuStatus.createFrom;
+const $$createType2 = Citation.createFrom;
 const $$createType3 = $Create.Array($$createType2);
+const $$createType4 = DocumentInfo.createFrom;
+const $$createType5 = $Create.Array($$createType4);

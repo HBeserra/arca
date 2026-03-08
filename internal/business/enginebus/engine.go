@@ -2,6 +2,7 @@
 package enginebus
 
 import (
+	"changeme/internal/business/enginebus/monitor"
 	"changeme/internal/business/types/status"
 	"context"
 	"fmt"
@@ -25,13 +26,14 @@ type (
 
 	// Engine manages the lifecycle of the LLM engine, including model loading and inference.
 	Engine struct {
-		logger    *slog.Logger
-		store     Store
-		krnEmbed  *kronk.Kronk // Embedding model instance
-		krnChat   *kronk.Kronk // Chat model instance
-		krnRerank *kronk.Kronk // Reranking model instance
-		autoLoad  bool
+		logger      *slog.Logger
+		store       Store
+		krnEmbed    *kronk.Kronk // Embedding model instance
+		krnChat     *kronk.Kronk // Chat model instance
+		krnRerank   *kronk.Kronk // Reranking model instance
+		statusCache *monitor.Business
 
+		autoLoad       bool
 		modelEmbedURL  string
 		modelChatURL   string
 		modelRerankURL string
@@ -75,6 +77,10 @@ func WithEmbedModel(url string) Option {
 
 func WithRerankModel(url string) Option {
 	return func(e *Engine) { e.modelRerankURL = url }
+}
+
+func WithMonitor(m *monitor.Business) Option {
+	return func(e *Engine) { e.statusCache = m }
 }
 
 func New(logger *slog.Logger, store Store, opts ...Option) (*Engine, error) {
@@ -121,23 +127,31 @@ func (e *Engine) Eject(ctx context.Context) error {
 
 	if e.krnEmbed != nil {
 		if err := e.krnEmbed.Unload(ctx); err != nil {
-			errs = append(errs, err)
+			errs = append(errs, fmt.Errorf("error unloading embedding model: %w", err))
 		}
+		e.krnEmbed = nil
 	}
 	if e.krnChat != nil {
 		if err := e.krnChat.Unload(ctx); err != nil {
-			errs = append(errs, err)
+			errs = append(errs, fmt.Errorf("error unloading chat model: %w", err))
 		}
+		e.krnChat = nil
 	}
 	if e.krnRerank != nil {
 		if err := e.krnRerank.Unload(ctx); err != nil {
-			errs = append(errs, err)
+			errs = append(errs, fmt.Errorf("error unloading rerank model: %w", err))
 		}
+		e.krnRerank = nil
 	}
 	if len(errs) > 0 {
+		e.logger.Error("Errors occurred while ejecting engine", "errors", errs)
 		return fmt.Errorf("errors occurred while closing engine: %v", errs)
 	}
 	return nil
+}
+
+func (e *Engine) LoadedModels() bool {
+	return e.krnEmbed != nil || e.krnChat != nil || e.krnRerank != nil
 }
 
 func (e *Engine) Close(ctx context.Context) error {
@@ -173,11 +187,31 @@ func (e *Engine) CreateSession(ctx context.Context, name string, opts ...Session
 }
 
 type AddDocumentInput struct {
+	ID          uuid.UUID // optional pre-generated ID; zero value = auto-generate
 	SessionID   uuid.UUID
+	ParentID    *uuid.UUID // nil = root-level document
 	Name        string
 	Path        string
 	Text        string
 	ContentType string
+}
+
+// CreateFolder creates a folder document (no content/embeddings) as a container
+// for files indexed from the same directory. parentID is nil for root folders.
+func (e *Engine) CreateFolder(ctx context.Context, sessionID uuid.UUID, name, path string, parentID *uuid.UUID) (Document, error) {
+	doc := Document{
+		ID:        uuid.New(),
+		SessionID: sessionID,
+		ParentID:  parentID,
+		Type:      "folder",
+		Name:      name,
+		Path:      path,
+		Status:    status.Completed,
+	}
+	if err := e.store.CreateDocument(ctx, doc); err != nil {
+		return Document{}, fmt.Errorf("create folder: %w", err)
+	}
+	return doc, nil
 }
 
 func (e *Engine) AddDocumentText(ctx context.Context, input AddDocumentInput) error {
@@ -189,10 +223,15 @@ func (e *Engine) AddDocumentText(ctx context.Context, input AddDocumentInput) er
 		return fmt.Errorf("getting session: %w", err)
 	}
 
-	documentID := uuid.New()
+	documentID := input.ID
+	if documentID == uuid.Nil {
+		documentID = uuid.New()
+	}
 	doc := Document{
 		ID:          documentID,
 		SessionID:   input.SessionID,
+		ParentID:    input.ParentID,
+		Type:        "file",
 		Name:        input.Name,
 		Path:        input.Path,
 		ContentType: input.ContentType,
@@ -338,7 +377,10 @@ func (e *Engine) AddDocumentTextStream(ctx context.Context, doc AddDocumentStrea
 
 func (e *Engine) SearchDocs(ctx context.Context, sessionID uuid.UUID, query string) ([]Fragment, error) {
 	if e.krnEmbed == nil {
-		return nil, fmt.Errorf("embedding model not loaded yet")
+		err := e.Load(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("embedding model not loaded and failed to load: %w", err)
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -470,7 +512,10 @@ func (e *Engine) loadModels(ctx context.Context) error {
 // ChatStream sends messages and returns a channel of streaming chat responses.
 func (e *Engine) ChatStream(ctx context.Context, msgs []model.D) (<-chan model.ChatResponse, error) {
 	if e.krnChat == nil {
-		return nil, fmt.Errorf("chat model not loaded")
+		err := e.Load(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("chat model not loaded and failed to load: %w", err)
+		}
 	}
 
 	d := model.D{
@@ -489,7 +534,10 @@ func (e *Engine) ChatStream(ctx context.Context, msgs []model.D) (<-chan model.C
 // Rerank reranks documents by relevance to the query.
 func (e *Engine) Rerank(ctx context.Context, query string, docs []string) ([]RankedDoc, error) {
 	if e.krnRerank == nil {
-		return nil, fmt.Errorf("rerank model not loaded")
+		err := e.Load(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("rerank model not loaded and failed to load: %w", err)
+		}
 	}
 
 	d := model.D{
@@ -517,9 +565,12 @@ func (e *Engine) Rerank(ctx context.Context, query string, docs []string) ([]Ran
 }
 
 // Summarize generates a short summary of text using the chat model.
-func (e *Engine) Summarize(text string) (string, error) {
+func (e *Engine) Summarize(ctx context.Context, text string) (string, error) {
 	if e.krnChat == nil {
-		return "", fmt.Errorf("chat model not loaded")
+		err := e.Load(ctx)
+		if err != nil {
+			return "", fmt.Errorf("chat model not loaded and failed to load: %w", err)
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -566,6 +617,21 @@ func (e *Engine) GetSession(ctx context.Context, sessionID uuid.UUID) (Session, 
 		return Session{}, fmt.Errorf("get session: %w", err)
 	}
 	return sess, nil
+}
+
+// RenameSession updates the name of a session.
+func (e *Engine) RenameSession(ctx context.Context, sessionID uuid.UUID, name string) error {
+	sess, err := e.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("rename session: get: %w", err)
+	}
+	sess.Name = name
+	if err := e.store.UpdateSession(ctx, sess); err != nil {
+		return fmt.Errorf("rename session: update: %w", err)
+	}
+
+	e.logger.Info("Session renamed", "sessionID", sessionID, "newName", sess.Name)
+	return nil
 }
 
 // DeleteSession removes a session by ID.
