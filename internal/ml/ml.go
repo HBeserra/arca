@@ -38,8 +38,11 @@ func ensureProcessorEnv() {
 
 // Defaults — override via options.
 const (
-	DefaultEmbedModel  = "ggml-org/embeddinggemma-300m-qat-q8_0-GGUF/embeddinggemma-300m-qat-Q8_0.gguf"
-	DefaultVisionModel = "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF"
+	DefaultEmbedModel = "ggml-org/embeddinggemma-300m-qat-q8_0-GGUF/embeddinggemma-300m-qat-Q8_0.gguf"
+	// A full HuggingFace URL is the most reliable source form: it triggers a
+	// direct download with automatic mmproj sibling discovery, independent of the
+	// resolver catalog. Swap the URL (or pass WithVisionModel) for another VLM.
+	DefaultVisionModel = "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
 	EmbedDim           = 768
 )
 
@@ -227,10 +230,16 @@ func (e *Engine) Classify(ctx context.Context, png []byte) (Classification, erro
 			continue
 		}
 		c := resp.Choices[0]
-		if c.FinishReason() == "error" {
-			return Classification{}, fmt.Errorf("ml: classify: model error: %s", c.Delta.Content)
+		// Delta is a *ResponseMessage and is nil on non-content events (e.g. the
+		// final finish_reason event).
+		content := ""
+		if c.Delta != nil {
+			content = c.Delta.Content
 		}
-		sb.WriteString(c.Delta.Content)
+		if c.FinishReason() == "error" {
+			return Classification{}, fmt.Errorf("ml: classify: model error: %s", content)
+		}
+		sb.WriteString(content)
 	}
 
 	var out Classification
