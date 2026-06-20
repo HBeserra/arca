@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ardanlabs/kronk/sdk/kronk"
 	"github.com/ardanlabs/kronk/sdk/kronk/model"
@@ -21,6 +22,15 @@ import (
 	"github.com/ardanlabs/kronk/sdk/tools/libs"
 	"github.com/ardanlabs/kronk/sdk/tools/models"
 )
+
+// withDefaultTimeout ensures ctx has a deadline — Kronk's inference calls require
+// one. If the caller already set a deadline it is kept; otherwise d is applied.
+func withDefaultTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, d)
+}
 
 // ensureProcessorEnv works around a Kronk v1.28.0 quirk on Apple Silicon: the
 // library downloader defaults to the cpu backend while the runtime loads metal,
@@ -189,7 +199,9 @@ func (e *Engine) Embed(ctx context.Context, text string) ([]float32, error) {
 	if err := e.EnsureEmbed(ctx); err != nil {
 		return nil, err
 	}
-	resp, err := e.krnEmbed.Embeddings(ctx, model.D{"input": text, "truncate": true})
+	ictx, cancel := withDefaultTimeout(ctx, 90*time.Second)
+	defer cancel()
+	resp, err := e.krnEmbed.Embeddings(ictx, model.D{"input": text, "truncate": true})
 	if err != nil {
 		return nil, fmt.Errorf("ml: embed: %w", err)
 	}
@@ -221,7 +233,9 @@ func (e *Engine) Classify(ctx context.Context, png []byte) (Classification, erro
 		"max_tokens": 768,
 	}
 
-	content, err := e.streamText(ctx, e.krnVision, d)
+	ictx, cancel := withDefaultTimeout(ctx, 4*time.Minute)
+	defer cancel()
+	content, err := e.streamText(ictx, e.krnVision, d)
 	if err != nil {
 		return Classification{}, fmt.Errorf("ml: classify: %w", err)
 	}
@@ -276,7 +290,9 @@ func (e *Engine) Complete(ctx context.Context, prompt string, schema map[string]
 		d["json_schema"] = model.D(schema)
 	}
 
-	content, err := e.streamText(ctx, e.krnVision, d)
+	ictx, cancel := withDefaultTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	content, err := e.streamText(ictx, e.krnVision, d)
 	if err != nil {
 		return "", fmt.Errorf("ml: complete: %w", err)
 	}
