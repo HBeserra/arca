@@ -13,7 +13,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 
 	"stitchvault/internal/embroidery"
 	"stitchvault/internal/ingest"
@@ -27,11 +29,24 @@ var readerScript []byte
 
 // Reader implements ingest.Reader using a Python subprocess.
 type Reader struct {
-	python     string
+	mu         sync.RWMutex
+	python     string // guarded: EnsurePyembroidery may switch it to a bootstrapped venv
 	scriptPath string
 }
 
 var _ ingest.Reader = (*Reader)(nil)
+
+func (r *Reader) pythonPath() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.python
+}
+
+func (r *Reader) setPython(p string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.python = p
+}
 
 // Option configures the Reader.
 type Option func(*Reader)
@@ -70,21 +85,70 @@ func New(opts ...Option) (*Reader, error) {
 // actionable error if not. Callers (e.g. app startup) can use it to warn early;
 // it is not required before Read.
 func (r *Reader) Check(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, r.python, "-c", "import pyembroidery")
+	py := r.pythonPath()
+	cmd := exec.CommandContext(ctx, py, "-c", "import pyembroidery")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf(
-			"pyreader: %q cannot import pyembroidery: %v: %s\n"+
-				"install it with:  %s -m pip install pyembroidery\n"+
-				"or set $STITCHVAULT_PYTHON to an interpreter that has it",
-			r.python, err, strings.TrimSpace(string(out)), r.python)
+		return fmt.Errorf("pyreader: %q cannot import pyembroidery: %v: %s",
+			py, err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// EnsurePyembroidery makes the reader able to parse: if the current interpreter
+// cannot import pyembroidery, it creates a dedicated virtualenv at
+// ~/.stitchvault/venv and pip-installs pyembroidery (pure-Python, no build), then
+// switches the reader to it. Network-dependent and may take a few seconds — call
+// it once at startup (e.g. in a goroutine). Idempotent and self-healing.
+func (r *Reader) EnsurePyembroidery(ctx context.Context) error {
+	if r.Check(ctx) == nil {
+		return nil
+	}
+	py, err := bootstrapVenv(ctx)
+	if err != nil {
+		return fmt.Errorf("pyreader: could not bootstrap pyembroidery: %w", err)
+	}
+	r.setPython(py)
+	return r.Check(ctx)
+}
+
+// bootstrapVenv creates ~/.stitchvault/venv (if absent) and installs pyembroidery,
+// returning the venv's python path.
+func bootstrapVenv(ctx context.Context) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	venvDir := filepath.Join(home, ".stitchvault", "venv")
+	py := venvPython(venvDir)
+
+	if _, err := os.Stat(py); err != nil {
+		base, err := exec.LookPath("python3")
+		if err != nil {
+			return "", fmt.Errorf("python3 not found on PATH: %w", err)
+		}
+		if out, err := exec.CommandContext(ctx, base, "-m", "venv", venvDir).CombinedOutput(); err != nil {
+			return "", fmt.Errorf("create venv: %v: %s", err, strings.TrimSpace(string(out)))
+		}
+	}
+
+	if out, err := exec.CommandContext(ctx, py, "-m", "pip", "install", "--quiet", "pyembroidery").CombinedOutput(); err != nil {
+		return "", fmt.Errorf("pip install pyembroidery: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return py, nil
+}
+
+// venvPython returns the interpreter path inside a venv for the current OS.
+func venvPython(venvDir string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(venvDir, "Scripts", "python.exe")
+	}
+	return filepath.Join(venvDir, "bin", "python")
 }
 
 // Read parses one file by invoking the sidecar. The context cancels the
 // subprocess (exec.CommandContext kills it), which is how batch imports abort.
 func (r *Reader) Read(ctx context.Context, path string) (*embroidery.Design, error) {
-	cmd := exec.CommandContext(ctx, r.python, r.scriptPath, path)
+	cmd := exec.CommandContext(ctx, r.pythonPath(), r.scriptPath, path)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -156,7 +220,7 @@ func defaultPython() string {
 		return p
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		venv := filepath.Join(home, ".stitchvault", "venv", "bin", "python")
+		venv := venvPython(filepath.Join(home, ".stitchvault", "venv"))
 		if _, err := os.Stat(venv); err == nil {
 			return venv
 		}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 
@@ -55,15 +56,23 @@ func main() {
 		log.Fatalf("catalogdb init: %v", err)
 	}
 
-	// pyreader never fails for a missing dependency — it warns and surfaces a
-	// clear per-file error at import time, so the app always starts.
+	// pyreader never fails for a missing dependency at construction — the app
+	// always starts. EnsurePyembroidery bootstraps a venv + installs pyembroidery
+	// in the background (self-healing if the venv is ever removed); imports before
+	// it completes surface a clear per-file error.
 	reader, err := pyreader.New()
 	if err != nil {
 		log.Fatalf("pyreader init: %v", err)
 	}
-	if err := reader.Check(context.Background()); err != nil {
-		logger.Warn("pyembroidery not available — imports will fail until it is installed", "err", err)
-	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if err := reader.EnsurePyembroidery(ctx); err != nil {
+			logger.Warn("pyembroidery unavailable — imports will fail until it is installed", "err", err)
+		} else {
+			logger.Info("pyembroidery ready")
+		}
+	}()
 
 	thumbs := thumbsDir()
 	mlEng := ml.New(logger)
