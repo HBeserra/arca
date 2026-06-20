@@ -229,10 +229,31 @@ func (e *Engine) ClassifyData(ctx context.Context, d Design) (ClassifyResult, er
 	if err != nil {
 		return ClassifyResult{}, fmt.Errorf("catalog: read thumbnail %s: %w", d.FileName, err)
 	}
-	c, err := e.cls.Classify(ctx, png, cleanName(d.FileName))
+
+	hint := classifyHint(d)
+	c, err := e.cls.Classify(ctx, png, hint)
 	if err != nil {
 		return ClassifyResult{}, err
 	}
+
+	// The vision model recognizes faces/animals/letters and reports when the design
+	// is rendered sideways or upside down. Rotate the stored thumbnail so the
+	// preview reads upright, then re-classify the corrected image once for better
+	// attributes (the first pass described a rotated subject). Done at most once, so
+	// a wrong correction can't loop.
+	if deg := rotateDegrees(c.Rotate); deg != 0 {
+		if rotated, rerr := render.RotatePNG(png, deg); rerr != nil {
+			e.log.Warn("catalog: rotate thumbnail failed", "file", d.FileName, "deg", deg, "err", rerr)
+		} else if werr := os.WriteFile(d.ThumbnailPath, rotated, 0o644); werr != nil {
+			e.log.Warn("catalog: persist rotated thumbnail failed", "file", d.FileName, "err", werr)
+		} else {
+			png = rotated
+			if c2, err2 := e.cls.Classify(ctx, png, hint); err2 == nil {
+				c = c2
+			}
+		}
+	}
+
 	tags := mergeTags(c.Tags, c.Elements)
 	emb, err := e.cls.Embed(ctx, embedText(c))
 	if err != nil {
@@ -291,8 +312,9 @@ func embedText(c ml.Classification) string {
 	if c.Style != "" {
 		parts = append(parts, c.Style)
 	}
-	parts = append(parts, c.Elements...)
-	parts = append(parts, c.Tags...)
+	// mergeTags drops run-on artifacts (e.g. a small VLM echoing the prompt into
+	// elements) so they don't pollute the similarity-search embedding.
+	parts = append(parts, mergeTags(c.Elements, c.Tags)...)
 	return strings.Join(parts, ". ")
 }
 
@@ -543,4 +565,37 @@ func cleanName(fileName string) string {
 	name := strings.TrimSuffix(fileName, filepath.Ext(fileName))
 	name = strings.NewReplacer("_", " ", "-", " ", ".", " ").Replace(name)
 	return strings.Join(strings.Fields(name), " ")
+}
+
+// classifyHint builds the textual context handed to the vision model: the cleaned
+// file name (a strong subject clue) and the design's physical size, so the model
+// knows a few-millimetre design is a tiny, simple motif rather than a busy scene.
+func classifyHint(d Design) string {
+	var parts []string
+	if n := cleanName(d.FileName); n != "" {
+		parts = append(parts, fmt.Sprintf("File name: %q.", n))
+	}
+	if d.WidthMM > 0 && d.HeightMM > 0 {
+		size := fmt.Sprintf("Physical size: %.1f × %.1f mm.", d.WidthMM, d.HeightMM)
+		if d.WidthMM < 20 && d.HeightMM < 20 {
+			size += " This is a very small design — likely a single simple motif or just a few stitches."
+		}
+		parts = append(parts, size)
+	}
+	return strings.Join(parts, " ")
+}
+
+// rotateDegrees maps the model's reported orientation to a clockwise rotation,
+// treating anything it can't parse (including "0") as no rotation.
+func rotateDegrees(s string) int {
+	switch strings.TrimSpace(s) {
+	case "90":
+		return 90
+	case "180":
+		return 180
+	case "270":
+		return 270
+	default:
+		return 0
+	}
 }

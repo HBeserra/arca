@@ -4,8 +4,11 @@
 package render
 
 import (
+	"bytes"
 	"fmt"
+	"image"
 	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 
@@ -18,6 +21,13 @@ import (
 const (
 	DefaultSize = 512 // thumbnail edge in pixels (square)
 	padding     = 12  // px of empty margin around the design
+
+	// minFillMM caps the zoom: a design this size (mm) exactly fills the canvas,
+	// and nothing is ever drawn larger. Without a cap, a tiny design (e.g. a 5 mm
+	// motif) is scaled up to fill the frame, turning its handful of stitches into
+	// a tangle of long lines. Smaller designs instead render proportionally small
+	// and centred, which also conveys their true physical size at a glance.
+	minFillMM = 40
 )
 
 // background is a soft off-white "paper" so light threads remain visible.
@@ -76,6 +86,10 @@ func drawDesign(dc *gg.Context, d *embroidery.Design, min, max embroidery.Point,
 	if s := avail / h; s < scale {
 		scale = s
 	}
+	// Cap the zoom so tiny designs aren't blown up into a tangle of lines.
+	if maxScale := avail / minFillMM; scale > maxScale {
+		scale = maxScale
+	}
 
 	// Centre the scaled design on the square canvas.
 	originX := (float64(size) - w*scale) / 2
@@ -109,4 +123,54 @@ func drawDesign(dc *gg.Context, d *embroidery.Design, min, max embroidery.Point,
 			dc.Stroke()
 		}
 	}
+}
+
+// RotatePNG returns the PNG rotated clockwise by degCW (normalized to 0, 90, 180
+// or 270). An embroidery file has no inherent "up", so a rendered design can come
+// out sideways or upside down; the vision model recognizes the subject and reports
+// the correction, which this applies to the stored thumbnail so the preview reads
+// upright. degCW == 0 returns the input unchanged.
+func RotatePNG(data []byte, degCW int) ([]byte, error) {
+	degCW = ((degCW % 360) + 360) % 360
+	if degCW != 90 && degCW != 180 && degCW != 270 {
+		return data, nil // 0 or any non-quadrant angle: leave unchanged
+	}
+
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("render: decode for rotate: %w", err)
+	}
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+
+	var dst *image.RGBA
+	switch degCW {
+	case 90: // (x,y) -> (h-1-y, x); canvas dimensions swap
+		dst = image.NewRGBA(image.Rect(0, 0, h, w))
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				dst.Set(h-1-y, x, img.At(b.Min.X+x, b.Min.Y+y))
+			}
+		}
+	case 180: // (x,y) -> (w-1-x, h-1-y)
+		dst = image.NewRGBA(image.Rect(0, 0, w, h))
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				dst.Set(w-1-x, h-1-y, img.At(b.Min.X+x, b.Min.Y+y))
+			}
+		}
+	case 270: // (x,y) -> (y, w-1-x); canvas dimensions swap
+		dst = image.NewRGBA(image.Rect(0, 0, h, w))
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				dst.Set(y, w-1-x, img.At(b.Min.X+x, b.Min.Y+y))
+			}
+		}
+	}
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, dst); err != nil {
+		return nil, fmt.Errorf("render: encode rotated: %w", err)
+	}
+	return buf.Bytes(), nil
 }

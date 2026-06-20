@@ -76,8 +76,17 @@ func main() {
 
 	thumbs := thumbsDir()
 	var mlOpts []ml.Option
-	if vm, _ := store.GetSetting(context.Background(), "vision_model"); vm != "" {
-		mlOpts = append(mlOpts, ml.WithVisionModel(vm))
+	{
+		ctx := context.Background()
+		stored, _ := store.GetSetting(ctx, "vision_model")
+		resolved := ml.ResolveVisionModel(stored)
+		if stored != "" && stored != resolved {
+			// A previously-selected model is no longer available (e.g. removed
+			// because it would not load) — migrate the setting to the default.
+			logger.Warn("vision model setting unavailable; using default", "stored", stored, "using", resolved)
+			_ = store.SetSetting(ctx, "vision_model", resolved)
+		}
+		mlOpts = append(mlOpts, ml.WithVisionModel(resolved))
 	}
 	mlEng := ml.New(logger, mlOpts...)
 	eng := catalog.New(logger, reader, render.New(), store, thumbs, catalog.WithClassifier(mlEng))

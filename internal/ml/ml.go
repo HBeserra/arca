@@ -12,8 +12,10 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"io/fs"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -56,12 +58,15 @@ func ensureProcessorEnv() {
 const (
 	DefaultEmbedModel = "ggml-org/embeddinggemma-300m-qat-q8_0-GGUF/embeddinggemma-300m-qat-Q8_0.gguf"
 	// Vision model presets (full HuggingFace URLs — the reliable source form that
-	// triggers a direct download with automatic mmproj sibling discovery). The
-	// default is the balanced one; users switch via the UI / WithVisionModel.
-	VisionFast       = "https://huggingface.co/ggml-org/SmolVLM2-2.2B-Instruct-GGUF/resolve/main/SmolVLM2-2.2B-Instruct-Q4_K_M.gguf"
-	VisionBalanced   = "https://huggingface.co/ggml-org/Qwen2-VL-2B-Instruct-GGUF/resolve/main/Qwen2-VL-2B-Instruct-Q4_K_M.gguf"
-	VisionQuality    = "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
-	DefaultVisionModel = VisionBalanced
+	// triggers a direct download with automatic mmproj sibling discovery). Both are
+	// verified to LOAD in the current Kronk/llama.cpp build. SmolVLM2 was dropped:
+	// it downloads fine but llama.cpp fails to initialize its mtmd (multimodal)
+	// context ("init-mtmd-meta-context: failed to initialize mtmd context"). Fast is
+	// the default; users switch via the UI / WithVisionModel.
+	VisionFast    = "https://huggingface.co/ggml-org/Qwen2-VL-2B-Instruct-GGUF/resolve/main/Qwen2-VL-2B-Instruct-Q4_K_M.gguf"
+	VisionQuality = "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
+
+	DefaultVisionModel = VisionFast
 
 	EmbedDim = 768
 
@@ -82,6 +87,11 @@ type Classification struct {
 	Theme    string   `json:"theme"`
 	Mood     string   `json:"mood"`
 	Tags     []string `json:"tags"`
+	// Rotate is the clockwise rotation in degrees ("0", "90", "180" or "270") the
+	// model judges the image needs to read upright. "0" for abstract/geometric
+	// designs with no inherent orientation. The caller rotates the thumbnail (and
+	// re-classifies the corrected image) when this is not "0".
+	Rotate string `json:"rotate"`
 }
 
 // Preset is a selectable vision model (shown in the UI picker).
@@ -95,10 +105,29 @@ type Preset struct {
 // VisionPresets returns the selectable vision models, fastest first.
 func VisionPresets() []Preset {
 	return []Preset{
-		{ID: "fast", Label: "Rápido", Description: "SmolVLM2 2.2B — o mais rápido", URL: VisionFast},
-		{ID: "balanced", Label: "Equilibrado", Description: "Qwen2-VL 2B — bom custo/qualidade", URL: VisionBalanced},
-		{ID: "quality", Label: "Qualidade", Description: "Qwen2.5-VL 3B — melhor qualidade, mais lento", URL: VisionQuality},
+		{ID: "fast", Label: "Rápido", Description: "Qwen2-VL 2B — rápido (~5-8s/imagem)", URL: VisionFast},
+		{ID: "quality", Label: "Qualidade", Description: "Qwen2.5-VL 3B — mais detalhes, porém mais lento", URL: VisionQuality},
 	}
+}
+
+// KnownVisionModel reports whether url is one of the built-in vision presets.
+func KnownVisionModel(url string) bool {
+	for _, p := range VisionPresets() {
+		if p.URL == url {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveVisionModel returns url when it is a known preset, otherwise the default.
+// It guards against a persisted choice that has since been removed (e.g. a model
+// that turned out not to load), so the app always starts on a working model.
+func ResolveVisionModel(url string) string {
+	if KnownVisionModel(url) {
+		return url
+	}
+	return DefaultVisionModel
 }
 
 // Engine lazily loads and holds the Kronk models. Methods load their model on
@@ -168,10 +197,22 @@ func (e *Engine) Unload(ctx context.Context) error {
 type Option func(*Engine)
 
 // WithEmbedModel overrides the embedding model source.
-func WithEmbedModel(s string) Option { return func(e *Engine) { if s != "" { e.embedModel = s } } }
+func WithEmbedModel(s string) Option {
+	return func(e *Engine) {
+		if s != "" {
+			e.embedModel = s
+		}
+	}
+}
 
 // WithVisionModel overrides the vision model source.
-func WithVisionModel(s string) Option { return func(e *Engine) { if s != "" { e.visionModel = s } } }
+func WithVisionModel(s string) Option {
+	return func(e *Engine) {
+		if s != "" {
+			e.visionModel = s
+		}
+	}
+}
 
 // WithConcurrency sets how many inferences run in parallel (model NSeqMax and the
 // caller's worker-pool size). Higher is faster but uses more VRAM per slot.
@@ -235,17 +276,64 @@ func (e *Engine) ensureSystem(ctx context.Context) error {
 	return nil
 }
 
-// downloadModel fetches a model (and its mmproj, if any) and returns its paths.
-func (e *Engine) downloadModel(ctx context.Context, source string) (models.Path, error) {
+// loadKronk downloads a model and constructs a Kronk instance from it, building
+// the load options via opts. It self-heals once: if construction fails (typically
+// "validate-config: sha256 mismatch" from an interrupted earlier download that
+// left an empty file in the cache), it purges zero-byte cache files and retries —
+// Download then re-fetches only the missing pieces, keeping multi-GB models.
+func (e *Engine) loadKronk(ctx context.Context, source string, opts func(models.Path) ([]model.Option, error)) (*kronk.Kronk, error) {
 	mdls, err := models.New()
 	if err != nil {
-		return models.Path{}, fmt.Errorf("ml: models new: %w", err)
+		return nil, fmt.Errorf("ml: models new: %w", err)
 	}
-	mp, err := mdls.Download(ctx, kronk.FmtLogger, source)
-	if err != nil {
-		return models.Path{}, fmt.Errorf("ml: download %q: %w", source, err)
+
+	attempt := func() (*kronk.Kronk, error) {
+		mp, err := mdls.Download(ctx, kronk.FmtLogger, source)
+		if err != nil {
+			return nil, fmt.Errorf("ml: download %q: %w", source, err)
+		}
+		mopts, err := opts(mp)
+		if err != nil {
+			return nil, err
+		}
+		krn, err := kronk.New(mopts...)
+		if err != nil {
+			return nil, fmt.Errorf("ml: new model %q: %w", source, err)
+		}
+		return krn, nil
 	}
-	return mp, nil
+
+	krn, err := attempt()
+	if err == nil {
+		return krn, nil
+	}
+	if n := purgeEmptyCacheFiles(mdls.Path(), e.log); n > 0 {
+		e.log.Warn("ml: load failed; cleared empty cache files and retrying", "removed", n, "source", source, "err", err)
+		return attempt()
+	}
+	return nil, err
+}
+
+// purgeEmptyCacheFiles deletes zero-byte files under root (the Kronk model cache).
+// An interrupted download can leave an empty .gguf or sha record that wedges the
+// model with a sha-mismatch on every load; an empty cache file is never valid.
+// Returns how many were removed.
+func purgeEmptyCacheFiles(root string, log *slog.Logger) int {
+	removed := 0
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, e := d.Info(); e != nil || info.Size() != 0 {
+			return nil
+		}
+		if os.Remove(path) == nil {
+			removed++
+			log.Warn("ml: removed empty cache file", "path", path)
+		}
+		return nil
+	})
+	return removed
 }
 
 // EnsureEmbed loads the embedding model if it is not already loaded.
@@ -258,20 +346,18 @@ func (e *Engine) EnsureEmbed(ctx context.Context) error {
 	if err := e.ensureSystem(ctx); err != nil {
 		return err
 	}
-	mp, err := e.downloadModel(ctx, e.embedModel)
+	krn, err := e.loadKronk(ctx, e.embedModel, func(mp models.Path) ([]model.Option, error) {
+		opts := []model.Option{
+			model.WithModelFiles(mp.ModelFiles),
+			model.WithAutoTune(true),
+		}
+		if e.concurrency > 1 {
+			opts = append(opts, model.WithNSeqMax(e.concurrency))
+		}
+		return opts, nil
+	})
 	if err != nil {
 		return err
-	}
-	opts := []model.Option{
-		model.WithModelFiles(mp.ModelFiles),
-		model.WithAutoTune(true),
-	}
-	if e.concurrency > 1 {
-		opts = append(opts, model.WithNSeqMax(e.concurrency))
-	}
-	krn, err := kronk.New(opts...)
-	if err != nil {
-		return fmt.Errorf("ml: new embed model: %w", err)
 	}
 	e.krnEmbed = krn
 	e.log.Info("ml: embedding model loaded", "source", e.embedModel)
@@ -294,30 +380,28 @@ func (e *Engine) EnsureVision(ctx context.Context) error {
 	if err := e.ensureSystem(ctx); err != nil {
 		return err
 	}
-	mp, err := e.downloadModel(ctx, e.visionModel)
+	krn, err := e.loadKronk(ctx, e.visionModel, func(mp models.Path) ([]model.Option, error) {
+		if mp.ProjFile == "" {
+			return nil, fmt.Errorf("ml: vision model %q has no mmproj (not a multimodal model?)", e.visionModel)
+		}
+		opts := []model.Option{
+			model.WithModelFiles(mp.ModelFiles),
+			model.WithProjFile(mp.ProjFile),
+			model.WithAutoTune(true),
+		}
+		if e.concurrency > 1 {
+			// Multiple sequence slots + non-incremental cache so several
+			// classifications can run in parallel against this one loaded model.
+			opts = append(opts,
+				model.WithNSeqMax(e.concurrency),
+				model.WithIncrementalCache(false),
+				model.WithContextWindow(8*1024),
+			)
+		}
+		return opts, nil
+	})
 	if err != nil {
 		return err
-	}
-	if mp.ProjFile == "" {
-		return fmt.Errorf("ml: vision model %q has no mmproj (not a multimodal model?)", e.visionModel)
-	}
-	opts := []model.Option{
-		model.WithModelFiles(mp.ModelFiles),
-		model.WithProjFile(mp.ProjFile),
-		model.WithAutoTune(true),
-	}
-	if e.concurrency > 1 {
-		// Multiple sequence slots + non-incremental cache so several
-		// classifications can run in parallel against this one loaded model.
-		opts = append(opts,
-			model.WithNSeqMax(e.concurrency),
-			model.WithIncrementalCache(false),
-			model.WithContextWindow(8*1024),
-		)
-	}
-	krn, err := kronk.New(opts...)
-	if err != nil {
-		return fmt.Errorf("ml: new vision model: %w", err)
 	}
 	e.krnVision = krn
 	e.loadedVision = e.visionModel
@@ -342,10 +426,12 @@ func (e *Engine) Embed(ctx context.Context, text string) ([]float32, error) {
 	return resp.Data[0].Embedding, nil
 }
 
-const classifyPrompt = `You are cataloguing a machine-embroidery design from its rendered image.
-Describe what is depicted as accurately as possible. Respond with: a single concise caption;
-the concrete visual elements present; the visual style; the overall theme; the mood; and 3 to 8
-short lowercase search tags.`
+const classifyPrompt = `Look at this machine-embroidery design and describe ONLY what you actually
+see in the image. Do not repeat, quote, or echo these instructions. Write the caption as one short
+sentence; list the concrete things you see as elements; give the visual style, the overall theme,
+and the mood; and provide 3 to 8 short lowercase search tags. For "rotate", output the clockwise
+degrees needed to make the design read upright — "0", "90", "180" or "270" — using "0" unless a
+clearly recognizable subject (a face, animal, or letter) appears sideways or upside down.`
 
 // Classify sends a rendered PNG to the vision model and returns structured
 // attributes, constrained to the schema via Kronk's json_schema grammar.
@@ -361,7 +447,7 @@ func (e *Engine) Classify(ctx context.Context, png []byte, hint string) (Classif
 
 	prompt := classifyPrompt
 	if h := strings.TrimSpace(hint); h != "" {
-		prompt += fmt.Sprintf("\n\nThe embroidery file is named %q, which often hints at the subject — use it as a clue but classify what you actually see.", h)
+		prompt += "\n\nContext about this file (use as a clue, but classify what you actually see): " + h
 	}
 
 	d := model.D{
@@ -457,11 +543,15 @@ func unmarshalLoose(s string, dst any) error {
 	return json.Unmarshal([]byte(repairJSON(s)), dst)
 }
 
-// repairJSON trims trailing whitespace and appends any missing closing quote and
-// brackets so a truncated-but-otherwise-valid JSON document parses.
+// repairJSON makes a slightly-malformed model JSON document parseable: it escapes
+// raw control characters inside string literals (small VLMs emit raw newlines/tabs,
+// which are illegal in JSON strings → "invalid character '\n' in string literal")
+// and appends any missing closing quote and brackets for a truncated document.
 func repairJSON(s string) string {
 	s = strings.TrimRight(s, " \t\r\n")
 
+	var b strings.Builder
+	b.Grow(len(s) + 8)
 	var stack []byte
 	inString, escaped := false, false
 	for i := 0; i < len(s); i++ {
@@ -470,10 +560,23 @@ func repairJSON(s string) string {
 			switch {
 			case escaped:
 				escaped = false
+				b.WriteByte(ch)
 			case ch == '\\':
 				escaped = true
+				b.WriteByte(ch)
 			case ch == '"':
 				inString = false
+				b.WriteByte(ch)
+			case ch == '\n':
+				b.WriteString(`\n`)
+			case ch == '\r':
+				b.WriteString(`\r`)
+			case ch == '\t':
+				b.WriteString(`\t`)
+			case ch < 0x20:
+				// drop other unprintable control characters
+			default:
+				b.WriteByte(ch)
 			}
 			continue
 		}
@@ -489,10 +592,8 @@ func repairJSON(s string) string {
 				stack = stack[:len(stack)-1]
 			}
 		}
+		b.WriteByte(ch)
 	}
-
-	var b strings.Builder
-	b.WriteString(s)
 	if inString {
 		b.WriteByte('"')
 	}
@@ -544,7 +645,8 @@ func classificationSchema() model.D {
 			"theme":    str,
 			"mood":     str,
 			"tags":     strArr,
+			"rotate":   model.D{"type": "string", "enum": []string{"0", "90", "180", "270"}},
 		},
-		"required": []string{"caption", "elements", "style", "theme", "mood", "tags"},
+		"required": []string{"caption", "elements", "style", "theme", "mood", "tags", "rotate"},
 	}
 }

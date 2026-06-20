@@ -108,7 +108,14 @@ func TestClassifyLive(t *testing.T) {
 	if len(c.Tags) == 0 {
 		t.Error("classification produced no tags")
 	}
+	// The rotate field must be one of the schema's enum values (the grammar
+	// constrains it); an abstract two-shape design should read upright ("0").
+	switch c.Rotate {
+	case "0", "90", "180", "270":
+	default:
+		t.Errorf("rotate = %q, want one of 0/90/180/270", c.Rotate)
+	}
 	// Surface the result so we can eyeball quality.
-	t.Logf("caption=%q\n elements=%v\n style=%q theme=%q mood=%q\n tags=%v",
-		c.Caption, c.Elements, c.Style, c.Theme, c.Mood, c.Tags)
+	t.Logf("caption=%q\n elements=%v\n style=%q theme=%q mood=%q\n tags=%v rotate=%q",
+		c.Caption, c.Elements, c.Style, c.Theme, c.Mood, c.Tags, c.Rotate)
 }

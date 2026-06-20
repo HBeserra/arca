@@ -3,8 +3,10 @@ package services
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
 
@@ -132,17 +134,17 @@ type FacetCountInfo struct {
 
 // ListFilter is the JSON-serialisable filter the gallery sends.
 type ListFilter struct {
-	Formats     []string `json:"formats"`
-	MinSizeMM   float64  `json:"minSizeMM"`
-	MaxSizeMM   float64  `json:"maxSizeMM"`
-	MinStitches int      `json:"minStitches"`
-	MaxStitches int      `json:"maxStitches"`
-	MinColors   int      `json:"minColors"`
-	MaxColors   int      `json:"maxColors"`
-	Search          string `json:"search"`
-	VirtualFolderID string `json:"virtualFolderID"`
-	Limit           int    `json:"limit"`
-	Offset          int    `json:"offset"`
+	Formats         []string `json:"formats"`
+	MinSizeMM       float64  `json:"minSizeMM"`
+	MaxSizeMM       float64  `json:"maxSizeMM"`
+	MinStitches     int      `json:"minStitches"`
+	MaxStitches     int      `json:"maxStitches"`
+	MinColors       int      `json:"minColors"`
+	MaxColors       int      `json:"maxColors"`
+	Search          string   `json:"search"`
+	VirtualFolderID string   `json:"virtualFolderID"`
+	Limit           int      `json:"limit"`
+	Offset          int      `json:"offset"`
 }
 
 // FolderInfo is the JSON view of an LLM-generated virtual folder.
@@ -576,11 +578,11 @@ func (s *CatalogService) SetVisionModel(id string) error {
 
 func toFilter(f ListFilter) catalog.Filter {
 	return catalog.Filter{
-		Formats:     f.Formats,
-		MinSizeMM:   f.MinSizeMM,
-		MaxSizeMM:   f.MaxSizeMM,
-		MinStitches: f.MinStitches,
-		MaxStitches: f.MaxStitches,
+		Formats:         f.Formats,
+		MinSizeMM:       f.MinSizeMM,
+		MaxSizeMM:       f.MaxSizeMM,
+		MinStitches:     f.MinStitches,
+		MaxStitches:     f.MaxStitches,
 		MinColors:       f.MinColors,
 		MaxColors:       f.MaxColors,
 		Search:          f.Search,
@@ -610,6 +612,14 @@ func designToInfo(d catalog.Design) DesignInfo {
 		tags = []string{}
 	}
 
+	// Cache-bust the thumbnail by file mtime so a re-rendered (zoom cap) or
+	// orientation-corrected image refreshes in the browser — the URL path is
+	// otherwise stable per design id, and the browser would serve a stale PNG.
+	thumbURL := "/thumb/" + d.ID.String() + ".png"
+	if fi, err := os.Stat(d.ThumbnailPath); err == nil {
+		thumbURL += "?v=" + strconv.FormatInt(fi.ModTime().Unix(), 10)
+	}
+
 	return DesignInfo{
 		ID:              d.ID.String(),
 		FileName:        d.FileName,
@@ -621,7 +631,7 @@ func designToInfo(d catalog.Design) DesignInfo {
 		ColorChanges:    d.ColorChanges,
 		ColorCount:      d.ColorCount,
 		Palette:         palette,
-		ThumbnailURL:    "/thumb/" + d.ID.String() + ".png",
+		ThumbnailURL:    thumbURL,
 		FileSize:        d.FileSize,
 		CreatedAt:       d.CreatedAt.Format(time.RFC3339),
 		Caption:         d.Caption,

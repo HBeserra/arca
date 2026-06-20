@@ -58,9 +58,17 @@ def main(argv):
         sys.stderr.write("pyembroidery not installed: %s\n" % e)
         return 3
 
-    pattern = pe.read(path)
+    try:
+        pattern = pe.read(path)
+    except Exception as e:
+        # pyembroidery raises on truncated / non-standard files (e.g. a PEC block
+        # that ends early -> "unsupported operand type(s) for +: 'NoneType' and
+        # 'int'"). Report it concisely instead of dumping a traceback; the file is
+        # skipped and the batch continues.
+        sys.stderr.write("could not parse file (pyembroidery %s: %s)\n" % (type(e).__name__, e))
+        return 4
     if pattern is None:
-        sys.stderr.write("unsupported or unreadable file: %s\n" % path)
+        sys.stderr.write("unsupported or unreadable file\n")
         return 4
 
     # pyembroidery base command -> our canonical int
