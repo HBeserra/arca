@@ -18,6 +18,9 @@ import type {
   ClassifyProgressPayload,
   ClassifyCompletePayload,
   ClassifyErrorPayload,
+  FolderInfo,
+  FoldersCompletePayload,
+  FoldersErrorPayload,
 } from "@/lib/types";
 import * as CatalogService from "../bindings/stitchvault/services/catalogservice";
 
@@ -37,6 +40,8 @@ export default function App() {
   const [errors, setErrors] = useState<string[]>([]);
   const [classifyStatus, setClassifyStatus] = useState<ClassifyStatus | null>(null);
   const [classifying, setClassifying] = useState<ImportState>({ active: false, done: 0, total: 0 });
+  const [folders, setFolders] = useState<FolderInfo[]>([]);
+  const [generatingFolders, setGeneratingFolders] = useState(false);
 
   const refreshDesigns = useCallback((f: ListFilter) => {
     CatalogService.ListDesigns(f as never).then((d) =>
@@ -57,11 +62,16 @@ export default function App() {
     });
   }, []);
 
-  // Facets + classify status once on mount (refreshed after each import/classify).
+  const refreshFolders = useCallback(() => {
+    CatalogService.ListFolders().then((f) => setFolders((f ?? []) as unknown as FolderInfo[]));
+  }, []);
+
+  // Facets, classify status, folders once on mount (refreshed after import/classify).
   useEffect(() => {
     refreshFacets();
     refreshClassifyStatus();
-  }, [refreshFacets, refreshClassifyStatus]);
+    refreshFolders();
+  }, [refreshFacets, refreshClassifyStatus, refreshFolders]);
 
   // Designs whenever the filter changes (and on mount).
   useEffect(() => {
@@ -72,11 +82,13 @@ export default function App() {
   const refreshDesignsRef = useRef(refreshDesigns);
   const refreshFacetsRef = useRef(refreshFacets);
   const refreshClassifyStatusRef = useRef(refreshClassifyStatus);
+  const refreshFoldersRef = useRef(refreshFolders);
   const filterRef = useRef(filter);
   useEffect(() => {
     refreshDesignsRef.current = refreshDesigns;
     refreshFacetsRef.current = refreshFacets;
     refreshClassifyStatusRef.current = refreshClassifyStatus;
+    refreshFoldersRef.current = refreshFolders;
     filterRef.current = filter;
   });
 
@@ -106,6 +118,16 @@ export default function App() {
       refreshClassifyStatusRef.current();
     });
 
+    const offFComplete = Events.On("folders:complete", (_e: { data: FoldersCompletePayload }) => {
+      setGeneratingFolders(false);
+      refreshFoldersRef.current();
+      refreshDesignsRef.current(filterRef.current);
+    });
+    const offFError = Events.On("folders:error", (e: { data: FoldersErrorPayload }) => {
+      setGeneratingFolders(false);
+      setErrors((prev) => [...prev.slice(-19), `pastas: ${e.data.error}`]);
+    });
+
     return () => {
       offProgress();
       offError();
@@ -113,6 +135,8 @@ export default function App() {
       offCProgress();
       offCError();
       offCComplete();
+      offFComplete();
+      offFError();
     };
   }, []);
 
@@ -139,6 +163,12 @@ export default function App() {
     CatalogService.ClassifyAll();
   }, []);
 
+  const handleGenerateFolders = useCallback(() => {
+    setErrors([]);
+    setGeneratingFolders(true);
+    CatalogService.GenerateFolders(8);
+  }, []);
+
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground">
@@ -161,7 +191,15 @@ export default function App() {
 
         <div className="flex flex-1 overflow-hidden min-h-0">
           <div className="w-64 flex-shrink-0 border-r flex flex-col overflow-hidden">
-            <FilterSidebar facets={facets} filter={filter} onChange={setFilter} />
+            <FilterSidebar
+              facets={facets}
+              filter={filter}
+              onChange={setFilter}
+              folders={folders}
+              foldersAvailable={(classifyStatus?.classified ?? 0) > 0}
+              generatingFolders={generatingFolders}
+              onGenerateFolders={handleGenerateFolders}
+            />
           </div>
 
           <div className="flex-1 flex flex-col overflow-hidden min-w-0">

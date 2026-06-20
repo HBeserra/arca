@@ -51,9 +51,10 @@ type Filter struct {
 	MaxStitches int
 	MinColors   int
 	MaxColors   int
-	Search      string // case-insensitive substring of the file name
-	Limit       int
-	Offset      int
+	Search          string // case-insensitive substring of the file name
+	VirtualFolderID string // restrict to one LLM-generated folder; "" = any
+	Limit           int
+	Offset          int
 }
 
 // Facets describes the whole catalog for the filter sidebar: the available
@@ -72,6 +73,22 @@ type FacetCount struct {
 	Count int
 }
 
+// VirtualFolder is an LLM-proposed grouping of designs. Count is how many designs
+// are assigned to it (filled by ListVirtualFolders).
+type VirtualFolder struct {
+	ID       uuid.UUID
+	ParentID *uuid.UUID
+	Name     string
+	Count    int
+}
+
+// DesignVector is a design id with its caption embedding, used for clustering
+// designs into folders by cosine similarity.
+type DesignVector struct {
+	ID        uuid.UUID
+	Embedding []float32
+}
+
 // Store is the persistence contract for the catalog. Implemented by catalogdb.
 type Store interface {
 	InsertDesign(ctx context.Context, d Design) error
@@ -83,14 +100,23 @@ type Store interface {
 	// Phase 2.
 	UpdateClassification(ctx context.Context, id uuid.UUID, caption string, tags []string, style string, embedding []float32) error
 	SearchSimilar(ctx context.Context, queryVec []float32, f Filter) ([]Design, error)
+
+	// Virtual folders.
+	ListForClustering(ctx context.Context) ([]DesignVector, error)
+	ClearVirtualFolders(ctx context.Context) error
+	CreateVirtualFolder(ctx context.Context, id uuid.UUID, name string) error
+	AssignFolder(ctx context.Context, designID, folderID uuid.UUID) error
+	ListVirtualFolders(ctx context.Context) ([]VirtualFolder, error)
 }
 
 // Classifier is the ML capability the engine needs for Phase 2: vision
-// classification and text embedding. Satisfied by *ml.Engine; an interface so the
-// engine can be tested with a fake.
+// classification, text embedding, and constrained text completion (for proposing
+// the folder taxonomy). Satisfied by *ml.Engine; an interface so the engine can be
+// tested with a fake.
 type Classifier interface {
 	Classify(ctx context.Context, png []byte) (ml.Classification, error)
 	Embed(ctx context.Context, text string) ([]float32, error)
+	Complete(ctx context.Context, prompt string, schema map[string]any) (string, error)
 }
 
 // designNamespace gives stable, path-derived UUIDv5 ids so re-importing the same

@@ -2,10 +2,13 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -279,4 +282,182 @@ func mergeTags(lists ...[]string) []string {
 		}
 	}
 	return out
+}
+
+// ─── virtual folders (LLM-driven) ───────────────────────────────────────────
+
+type folderSpec struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// GenerateFolders asks the LLM to propose a folder taxonomy from the catalog's
+// classifications, then assigns every classified design to its nearest folder by
+// caption-embedding cosine similarity. Replaces any existing folders. Returns the
+// resulting folders with counts.
+func (e *Engine) GenerateFolders(ctx context.Context, targetCount int) ([]VirtualFolder, error) {
+	if e.cls == nil {
+		return nil, fmt.Errorf("catalog: folder generation unavailable (no ML engine)")
+	}
+	if targetCount <= 0 {
+		targetCount = 8
+	}
+
+	vectors, err := e.store.ListForClustering(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(vectors) == 0 {
+		return nil, fmt.Errorf("catalog: no classified designs to organize — classify first")
+	}
+
+	all, err := e.store.ListDesigns(ctx, Filter{Limit: 100000})
+	if err != nil {
+		return nil, err
+	}
+
+	out, err := e.cls.Complete(ctx, buildTaxonomyPrompt(all, targetCount), folderSchema())
+	if err != nil {
+		return nil, err
+	}
+	var parsed struct {
+		Folders []folderSpec `json:"folders"`
+	}
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		return nil, fmt.Errorf("catalog: parse taxonomy %q: %w", out, err)
+	}
+
+	type folder struct {
+		id   uuid.UUID
+		name string
+		vec  []float32
+	}
+	var folders []folder
+	for _, f := range parsed.Folders {
+		name := strings.TrimSpace(f.Name)
+		if name == "" {
+			continue
+		}
+		vec, err := e.cls.Embed(ctx, name+". "+f.Description)
+		if err != nil {
+			return nil, fmt.Errorf("catalog: embed folder %q: %w", name, err)
+		}
+		folders = append(folders, folder{id: uuid.New(), name: name, vec: vec})
+	}
+	if len(folders) == 0 {
+		return nil, fmt.Errorf("catalog: the LLM proposed no usable folders")
+	}
+
+	if err := e.store.ClearVirtualFolders(ctx); err != nil {
+		return nil, err
+	}
+	for _, f := range folders {
+		if err := e.store.CreateVirtualFolder(ctx, f.id, f.name); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, dv := range vectors {
+		best := -2.0
+		bestID := folders[0].id
+		for _, f := range folders {
+			if sim := cosine(dv.Embedding, f.vec); sim > best {
+				best, bestID = sim, f.id
+			}
+		}
+		if err := e.store.AssignFolder(ctx, dv.ID, bestID); err != nil {
+			return nil, err
+		}
+	}
+
+	return e.store.ListVirtualFolders(ctx)
+}
+
+// ListFolders returns the current virtual folders with counts.
+func (e *Engine) ListFolders(ctx context.Context) ([]VirtualFolder, error) {
+	return e.store.ListVirtualFolders(ctx)
+}
+
+func folderSchema() map[string]any {
+	str := map[string]any{"type": "string"}
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"folders": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type":       "object",
+					"properties": map[string]any{"name": str, "description": str},
+					"required":   []string{"name", "description"},
+				},
+			},
+		},
+		"required": []string{"folders"},
+	}
+}
+
+func buildTaxonomyPrompt(designs []Design, targetCount int) string {
+	tagFreq := map[string]int{}
+	var captions []string
+	for _, d := range designs {
+		if d.Caption == "" {
+			continue
+		}
+		for _, t := range d.Tags {
+			tagFreq[t]++
+		}
+		if len(captions) < 40 {
+			captions = append(captions, d.Caption)
+		}
+	}
+
+	type tc struct {
+		tag string
+		n   int
+	}
+	tags := make([]tc, 0, len(tagFreq))
+	for t, n := range tagFreq {
+		tags = append(tags, tc{t, n})
+	}
+	sort.Slice(tags, func(i, j int) bool { return tags[i].n > tags[j].n })
+	top := make([]string, 0, 40)
+	for i := 0; i < len(tags) && i < 40; i++ {
+		top = append(top, tags[i].tag)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are organizing a library of %d machine-embroidery designs into about %d virtual folders by subject/theme.\n\n", len(designs), targetCount)
+	if len(top) > 0 {
+		b.WriteString("Most common tags across the library:\n")
+		b.WriteString(strings.Join(top, ", "))
+		b.WriteString("\n\n")
+	}
+	if len(captions) > 0 {
+		b.WriteString("Example design captions:\n")
+		for _, c := range captions {
+			b.WriteString("- ")
+			b.WriteString(c)
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(&b, "Propose about %d concise, mutually distinct folder categories that organize the whole library. ", targetCount)
+	b.WriteString("Each folder needs a short Title-Case name and a one-sentence description. Prefer subject/theme categories (animals, flowers, holidays, monograms, sports, vehicles, geometric, food, fantasy, etc.).")
+	return b.String()
+}
+
+func cosine(a, b []float32) float64 {
+	if len(a) != len(b) || len(a) == 0 {
+		return -1
+	}
+	var dot, na, nb float64
+	for i := range a {
+		dot += float64(a[i]) * float64(b[i])
+		na += float64(a[i]) * float64(a[i])
+		nb += float64(b[i]) * float64(b[i])
+	}
+	if na == 0 || nb == 0 {
+		return -1
+	}
+	return dot / (math.Sqrt(na) * math.Sqrt(nb))
 }

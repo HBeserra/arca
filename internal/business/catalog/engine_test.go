@@ -217,3 +217,88 @@ func TestClassifyAndSearchLive(t *testing.T) {
 		t.Errorf("semantic search returned %d results, none matching the classified design", len(res))
 	}
 }
+
+// fakeClassifier implements catalog.Classifier without any models, for testing the
+// folder-generation mechanism deterministically.
+type fakeClassifier struct{}
+
+func fakeEmbed(text string) []float32 {
+	v := make([]float32, ml.EmbedDim)
+	for i, r := range text {
+		v[i%ml.EmbedDim] += float32(r)
+	}
+	return v
+}
+
+func (fakeClassifier) Classify(_ context.Context, _ []byte) (ml.Classification, error) {
+	return ml.Classification{Caption: "x", Tags: []string{"x"}}, nil
+}
+func (fakeClassifier) Embed(_ context.Context, text string) ([]float32, error) {
+	return fakeEmbed(text), nil
+}
+func (fakeClassifier) Complete(_ context.Context, _ string, _ map[string]any) (string, error) {
+	return `{"folders":[{"name":"Animals","description":"cats dogs and other animals"},{"name":"Shapes","description":"geometric shapes and patterns"}]}`, nil
+}
+
+// TestGenerateFoldersMechanism verifies taxonomy parsing, folder embedding, cosine
+// assignment and persistence — no models, fully deterministic.
+func TestGenerateFoldersMechanism(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("duckdb", filepath.Join(t.TempDir(), "cat.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	store, err := catalogdb.New(discard(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	eng := catalog.New(discard(), nil, render.New(), store, t.TempDir(), catalog.WithClassifier(fakeClassifier{}))
+
+	captions := map[string]string{"cat": "a fluffy cat", "dog": "a happy dog", "circle": "a blue circle shape"}
+	for name, cap := range captions {
+		id := catalog.DesignID("/x/" + name)
+		if err := store.InsertDesign(ctx, catalog.Design{
+			ID: id, Path: "/x/" + name, FileName: name + ".pes", Format: ".pes",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.UpdateClassification(ctx, id, cap, []string{name}, "simple", fakeEmbed(cap)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	folders, err := eng.GenerateFolders(ctx, 2)
+	if err != nil {
+		t.Fatalf("GenerateFolders: %v", err)
+	}
+	if len(folders) != 2 {
+		t.Fatalf("got %d folders, want 2", len(folders))
+	}
+
+	// Every design must be assigned, and folder counts must sum to 3.
+	total := 0
+	for _, f := range folders {
+		total += f.Count
+		n, err := store.CountDesigns(ctx, catalog.Filter{VirtualFolderID: f.ID.String()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != f.Count {
+			t.Errorf("folder %q: filter count %d != reported %d", f.Name, n, f.Count)
+		}
+	}
+	if total != 3 {
+		t.Errorf("folder counts sum to %d, want 3 (every design assigned)", total)
+	}
+
+	// Re-generating clears and replaces (no duplicate folders).
+	folders2, err := eng.GenerateFolders(ctx, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(folders2) != 2 {
+		t.Errorf("after re-generate got %d folders, want 2 (cleared)", len(folders2))
+	}
+}

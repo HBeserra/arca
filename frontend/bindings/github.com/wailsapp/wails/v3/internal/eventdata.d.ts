@@ -15,6 +15,8 @@ declare module "@wailsio/runtime" {
             "classify:complete": services$0.ClassifyCompleteEvent;
             "classify:error": services$0.ClassifyErrorEvent;
             "classify:progress": services$0.ClassifyProgressEvent;
+            "folders:complete": services$0.FoldersCompleteEvent;
+            "folders:error": services$0.FoldersErrorEvent;
             "import:complete": services$0.ImportCompleteEvent;
             "import:error": services$0.ImportErrorEvent;
             "import:progress": services$0.ImportProgressEvent;

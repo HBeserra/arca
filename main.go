@@ -37,6 +37,8 @@ func init() {
 	application.RegisterEvent[services.ClassifyProgressEvent]("classify:progress")
 	application.RegisterEvent[services.ClassifyCompleteEvent]("classify:complete")
 	application.RegisterEvent[services.ClassifyErrorEvent]("classify:error")
+	application.RegisterEvent[services.FoldersCompleteEvent]("folders:complete")
+	application.RegisterEvent[services.FoldersErrorEvent]("folders:error")
 }
 
 func main() {

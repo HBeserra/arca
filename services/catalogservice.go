@@ -124,9 +124,28 @@ type ListFilter struct {
 	MaxStitches int      `json:"maxStitches"`
 	MinColors   int      `json:"minColors"`
 	MaxColors   int      `json:"maxColors"`
-	Search      string   `json:"search"`
-	Limit       int      `json:"limit"`
-	Offset      int      `json:"offset"`
+	Search          string `json:"search"`
+	VirtualFolderID string `json:"virtualFolderID"`
+	Limit           int    `json:"limit"`
+	Offset          int    `json:"offset"`
+}
+
+// FolderInfo is the JSON view of an LLM-generated virtual folder.
+type FolderInfo struct {
+	ID       string `json:"id"`
+	ParentID string `json:"parentID"`
+	Name     string `json:"name"`
+	Count    int    `json:"count"`
+}
+
+// FoldersCompleteEvent is emitted when folder generation finishes.
+type FoldersCompleteEvent struct {
+	Count int `json:"count"`
+}
+
+// FoldersErrorEvent is emitted when folder generation fails.
+type FoldersErrorEvent struct {
+	Error string `json:"error"`
 }
 
 // ─── Service ────────────────────────────────────────────────────────────────
@@ -386,6 +405,42 @@ func (s *CatalogService) runClassify(todo []catalog.Design) {
 		fmt.Sprintf("Classificados %d de %d designs.", classified, total), s.appIcon)
 }
 
+// ListFolders returns the current LLM-generated virtual folders with counts.
+func (s *CatalogService) ListFolders() ([]FolderInfo, error) {
+	folders, err := s.eng.ListFolders(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("catalog: list folders: %w", err)
+	}
+	out := make([]FolderInfo, 0, len(folders))
+	for _, f := range folders {
+		parent := ""
+		if f.ParentID != nil {
+			parent = f.ParentID.String()
+		}
+		out = append(out, FolderInfo{ID: f.ID.String(), ParentID: parent, Name: f.Name, Count: f.Count})
+	}
+	return out, nil
+}
+
+// GenerateFolders asks the LLM (in the background) to propose a folder taxonomy
+// and assigns every classified design to its nearest folder. Emits folders:* events.
+func (s *CatalogService) GenerateFolders(targetCount int) error {
+	if !s.eng.HasClassifier() {
+		return fmt.Errorf("catalog: folder generation unavailable (no vision model)")
+	}
+	go func() {
+		folders, err := s.eng.GenerateFolders(context.Background(), targetCount)
+		if err != nil {
+			application.Get().Event.Emit("folders:error", FoldersErrorEvent{Error: err.Error()})
+			return
+		}
+		application.Get().Event.Emit("folders:complete", FoldersCompleteEvent{Count: len(folders)})
+		_ = beeep.Notify("StitchVault — pastas virtuais",
+			fmt.Sprintf("%d pastas geradas pela IA.", len(folders)), s.appIcon)
+	}()
+	return nil
+}
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 func toFilter(f ListFilter) catalog.Filter {
@@ -395,11 +450,12 @@ func toFilter(f ListFilter) catalog.Filter {
 		MaxSizeMM:   f.MaxSizeMM,
 		MinStitches: f.MinStitches,
 		MaxStitches: f.MaxStitches,
-		MinColors:   f.MinColors,
-		MaxColors:   f.MaxColors,
-		Search:      f.Search,
-		Limit:       f.Limit,
-		Offset:      f.Offset,
+		MinColors:       f.MinColors,
+		MaxColors:       f.MaxColors,
+		Search:          f.Search,
+		VirtualFolderID: f.VirtualFolderID,
+		Limit:           f.Limit,
+		Offset:          f.Offset,
 	}
 }
 

@@ -51,6 +51,7 @@ export interface ListFilter {
   minColors: number;
   maxColors: number;
   search: string;
+  virtualFolderID: string;
   limit: number;
   offset: number;
 }
@@ -64,9 +65,25 @@ export const emptyFilter: ListFilter = {
   minColors: 0,
   maxColors: 0,
   search: "",
+  virtualFolderID: "",
   limit: 500,
   offset: 0,
 };
+
+export interface FolderInfo {
+  id: string;
+  parentID: string;
+  name: string;
+  count: number;
+}
+
+export interface FoldersCompletePayload {
+  count: number;
+}
+
+export interface FoldersErrorPayload {
+  error: string;
+}
 
 // Wails event payloads (emitted by CatalogService).
 export interface ImportProgressPayload {

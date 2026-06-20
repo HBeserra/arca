@@ -1,18 +1,30 @@
-import { Check, FolderTree, X } from "lucide-react";
+import { Check, FolderTree, Folder, Sparkles, Loader2, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { FacetInfo, ListFilter } from "@/lib/types";
+import type { FacetInfo, ListFilter, FolderInfo } from "@/lib/types";
 import { emptyFilter } from "@/lib/types";
 
 interface Props {
   facets: FacetInfo | null;
   filter: ListFilter;
   onChange: (f: ListFilter) => void;
+  folders: FolderInfo[];
+  foldersAvailable: boolean;
+  generatingFolders: boolean;
+  onGenerateFolders: () => void;
 }
 
-export function FilterSidebar({ facets, filter, onChange }: Props) {
+export function FilterSidebar({
+  facets,
+  filter,
+  onChange,
+  folders,
+  foldersAvailable,
+  generatingFolders,
+  onGenerateFolders,
+}: Props) {
   const set = (patch: Partial<ListFilter>) => onChange({ ...filter, ...patch });
 
   const toggleFormat = (fmt: string) => {
@@ -102,14 +114,67 @@ export function FilterSidebar({ facets, filter, onChange }: Props) {
             onChange={(lo, hi) => set({ minColors: lo, maxColors: hi })}
           />
 
-          {/* Virtual folders — populated by the LLM in Phase 2 */}
+          {/* Virtual folders — LLM-generated */}
           <section className="space-y-1.5 pt-2 border-t">
-            <h3 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              <FolderTree className="h-3.5 w-3.5" /> Pastas virtuais
-            </h3>
-            <p className="text-xs text-muted-foreground/70 leading-relaxed">
-              Geradas por IA a partir do conteúdo dos bordados (Fase 2).
-            </p>
+            <div className="flex items-center justify-between">
+              <h3 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <FolderTree className="h-3.5 w-3.5" /> Pastas virtuais
+              </h3>
+              {foldersAvailable && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-1.5 text-xs"
+                  onClick={onGenerateFolders}
+                  disabled={generatingFolders}
+                  title="Gerar pastas com IA a partir do conteúdo dos bordados"
+                >
+                  {generatingFolders ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                  {folders.length > 0 ? "Regenerar" : "Gerar"}
+                </Button>
+              )}
+            </div>
+
+            {!foldersAvailable ? (
+              <p className="text-xs text-muted-foreground/70 leading-relaxed">
+                Classifique os bordados (botão "Classificar IA") para organizá-los por tema.
+              </p>
+            ) : folders.length === 0 ? (
+              <p className="text-xs text-muted-foreground/70 leading-relaxed">
+                {generatingFolders ? "Gerando pastas…" : 'Nenhuma pasta ainda — clique em "Gerar".'}
+              </p>
+            ) : (
+              <div className="space-y-0.5">
+                <button
+                  onClick={() => set({ virtualFolderID: "" })}
+                  className={cn(
+                    "flex w-full items-center rounded-md px-2 py-1 text-sm transition-colors",
+                    filter.virtualFolderID === "" ? "bg-accent text-accent-foreground" : "hover:bg-muted"
+                  )}
+                >
+                  Todas
+                </button>
+                {folders.map((f) => {
+                  const active = filter.virtualFolderID === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      onClick={() => set({ virtualFolderID: active ? "" : f.id })}
+                      className={cn(
+                        "flex w-full items-center justify-between gap-1 rounded-md px-2 py-1 text-sm transition-colors",
+                        active ? "bg-accent text-accent-foreground" : "hover:bg-muted"
+                      )}
+                    >
+                      <span className="flex items-center gap-1.5 truncate">
+                        <Folder className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
+                        <span className="truncate">{f.name}</span>
+                      </span>
+                      <span className="text-xs text-muted-foreground">{f.count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </section>
         </div>
       </ScrollArea>

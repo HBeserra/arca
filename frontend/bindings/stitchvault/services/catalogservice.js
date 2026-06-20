@@ -67,6 +67,16 @@ export function Facets() {
 }
 
 /**
+ * GenerateFolders asks the LLM (in the background) to propose a folder taxonomy
+ * and assigns every classified design to its nearest folder. Emits folders:* events.
+ * @param {number} targetCount
+ * @returns {$CancellablePromise<void>}
+ */
+export function GenerateFolders(targetCount) {
+    return $Call.ByID(2783784617, targetCount);
+}
+
+/**
  * GetDesign returns a single design by id.
  * @param {string} id
  * @returns {$CancellablePromise<$models.DesignInfo | null>}
@@ -103,12 +113,22 @@ export function ListDesigns(filter) {
 }
 
 /**
+ * ListFolders returns the current LLM-generated virtual folders with counts.
+ * @returns {$CancellablePromise<$models.FolderInfo[]>}
+ */
+export function ListFolders() {
+    return $Call.ByID(2026409948).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType8($result);
+    }));
+}
+
+/**
  * PickFiles opens a native multi-file dialog and returns the selected paths.
  * @returns {$CancellablePromise<string[]>}
  */
 export function PickFiles() {
     return $Call.ByID(936146497).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType7($result);
+        return $$createType9($result);
     }));
 }
 
@@ -128,4 +148,6 @@ const $$createType3 = $Create.Nullable($$createType2);
 const $$createType4 = $models.FacetInfo.createFrom;
 const $$createType5 = $Create.Nullable($$createType4);
 const $$createType6 = $Create.Array($$createType0);
-const $$createType7 = $Create.Array($Create.Any);
+const $$createType7 = $models.FolderInfo.createFrom;
+const $$createType8 = $Create.Array($$createType7);
+const $$createType9 = $Create.Array($Create.Any);

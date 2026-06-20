@@ -249,6 +249,47 @@ func (e *Engine) Classify(ctx context.Context, png []byte) (Classification, erro
 	return out, nil
 }
 
+// Complete generates a text completion constrained to the given JSON schema,
+// reusing the vision model as a text LLM (Qwen2.5-VL handles text-only chat). Used
+// for proposing the virtual-folder taxonomy. Loads the vision model on first use.
+func (e *Engine) Complete(ctx context.Context, prompt string, schema map[string]any) (string, error) {
+	if err := e.EnsureVision(ctx); err != nil {
+		return "", err
+	}
+
+	d := model.D{
+		"messages":    []model.D{{"role": "user", "content": prompt}},
+		"temperature": 0.3,
+		"top_p":       0.9,
+		"max_tokens":  2048,
+	}
+	if len(schema) > 0 {
+		d["json_schema"] = model.D(schema)
+	}
+
+	ch, err := e.krnVision.ChatStreaming(ctx, d)
+	if err != nil {
+		return "", fmt.Errorf("ml: complete stream: %w", err)
+	}
+
+	var sb strings.Builder
+	for resp := range ch {
+		if len(resp.Choices) == 0 {
+			continue
+		}
+		c := resp.Choices[0]
+		content := ""
+		if c.Delta != nil {
+			content = c.Delta.Content
+		}
+		if c.FinishReason() == "error" {
+			return "", fmt.Errorf("ml: complete: model error: %s", content)
+		}
+		sb.WriteString(content)
+	}
+	return strings.TrimSpace(sb.String()), nil
+}
+
 // Close unloads any loaded models.
 func (e *Engine) Close(ctx context.Context) error {
 	e.mu.Lock()

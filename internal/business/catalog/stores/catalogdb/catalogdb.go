@@ -300,6 +300,119 @@ func floatSliceToLiteral(vec []float32) string {
 	return sb.String()
 }
 
+// ─── virtual folders ────────────────────────────────────────────────────────
+
+// ListForClustering returns id+embedding for every classified design.
+func (s *Store) ListForClustering(ctx context.Context) ([]catalog.DesignVector, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, embedding FROM designs WHERE embedding IS NOT NULL`)
+	if err != nil {
+		return nil, fmt.Errorf("list for clustering: %w", err)
+	}
+	defer rows.Close()
+
+	var out []catalog.DesignVector
+	for rows.Next() {
+		var idStr string
+		var emb any
+		if err := rows.Scan(&idStr, &emb); err != nil {
+			return nil, fmt.Errorf("scan vector: %w", err)
+		}
+		id, err := uuid.Parse(idStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse id: %w", err)
+		}
+		out = append(out, catalog.DesignVector{ID: id, Embedding: decodeFloatSlice(emb)})
+	}
+	return out, rows.Err()
+}
+
+// ClearVirtualFolders removes all folders and unassigns every design.
+func (s *Store) ClearVirtualFolders(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `UPDATE designs SET virtual_folder_id = NULL`); err != nil {
+		return fmt.Errorf("clear folder assignments: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM virtual_folders`); err != nil {
+		return fmt.Errorf("delete folders: %w", err)
+	}
+	return nil
+}
+
+// CreateVirtualFolder inserts a smart (LLM-generated) folder.
+func (s *Store) CreateVirtualFolder(ctx context.Context, id uuid.UUID, name string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO virtual_folders (id, name, kind) VALUES ($1, $2, 'smart')`,
+		id.String(), name)
+	if err != nil {
+		return fmt.Errorf("create folder: %w", err)
+	}
+	return nil
+}
+
+// AssignFolder sets a design's virtual folder.
+func (s *Store) AssignFolder(ctx context.Context, designID, folderID uuid.UUID) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE designs SET virtual_folder_id = $2 WHERE id = $1`,
+		designID.String(), folderID.String())
+	if err != nil {
+		return fmt.Errorf("assign folder: %w", err)
+	}
+	return nil
+}
+
+// ListVirtualFolders returns folders with their design counts (most populous first).
+func (s *Store) ListVirtualFolders(ctx context.Context) ([]catalog.VirtualFolder, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT f.id, f.parent_id, f.name, COUNT(d.id)
+		FROM virtual_folders f
+		LEFT JOIN designs d ON d.virtual_folder_id = f.id
+		GROUP BY f.id, f.parent_id, f.name
+		ORDER BY COUNT(d.id) DESC, f.name`)
+	if err != nil {
+		return nil, fmt.Errorf("list folders: %w", err)
+	}
+	defer rows.Close()
+
+	var out []catalog.VirtualFolder
+	for rows.Next() {
+		var idStr, name string
+		var parentID sql.NullString
+		var count int
+		if err := rows.Scan(&idStr, &parentID, &name, &count); err != nil {
+			return nil, fmt.Errorf("scan folder: %w", err)
+		}
+		id, err := uuid.Parse(idStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse folder id: %w", err)
+		}
+		var pid *uuid.UUID
+		if parentID.Valid && parentID.String != "" {
+			if p, err := uuid.Parse(parentID.String); err == nil {
+				pid = &p
+			}
+		}
+		out = append(out, catalog.VirtualFolder{ID: id, ParentID: pid, Name: name, Count: count})
+	}
+	return out, rows.Err()
+}
+
+// decodeFloatSlice converts DuckDB's []interface{}{float...} into []float32.
+func decodeFloatSlice(v any) []float32 {
+	raw, ok := v.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]float32, len(raw))
+	for i, x := range raw {
+		switch f := x.(type) {
+		case float32:
+			out[i] = f
+		case float64:
+			out[i] = float32(f)
+		}
+	}
+	return out
+}
+
 // buildWhere turns a Filter into a parameterized WHERE clause (with a leading
 // " WHERE " when non-empty) and its positional args.
 func buildWhere(f catalog.Filter) (string, []any) {
@@ -340,6 +453,9 @@ func buildWhere(f catalog.Filter) (string, []any) {
 	if s := strings.TrimSpace(f.Search); s != "" {
 		args = append(args, "%"+strings.ToLower(s)+"%")
 		conds = append(conds, fmt.Sprintf("lower(file_name) LIKE $%d", len(args)))
+	}
+	if f.VirtualFolderID != "" {
+		addCmp("virtual_folder_id = $%d", f.VirtualFolderID)
 	}
 
 	if len(conds) == 0 {

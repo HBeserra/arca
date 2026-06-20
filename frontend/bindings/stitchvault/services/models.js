@@ -499,6 +499,120 @@ export class FacetInfo {
 }
 
 /**
+ * FolderInfo is the JSON view of an LLM-generated virtual folder.
+ */
+export class FolderInfo {
+    /**
+     * Creates a new FolderInfo instance.
+     * @param {Partial<FolderInfo>} [$$source = {}] - The source object to create the FolderInfo.
+     */
+    constructor($$source = {}) {
+        if (!("id" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["id"] = "";
+        }
+        if (!("parentID" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["parentID"] = "";
+        }
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("count" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["count"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FolderInfo instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {FolderInfo}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new FolderInfo(/** @type {Partial<FolderInfo>} */($$parsedSource));
+    }
+}
+
+/**
+ * FoldersCompleteEvent is emitted when folder generation finishes.
+ */
+export class FoldersCompleteEvent {
+    /**
+     * Creates a new FoldersCompleteEvent instance.
+     * @param {Partial<FoldersCompleteEvent>} [$$source = {}] - The source object to create the FoldersCompleteEvent.
+     */
+    constructor($$source = {}) {
+        if (!("count" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["count"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FoldersCompleteEvent instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {FoldersCompleteEvent}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new FoldersCompleteEvent(/** @type {Partial<FoldersCompleteEvent>} */($$parsedSource));
+    }
+}
+
+/**
+ * FoldersErrorEvent is emitted when folder generation fails.
+ */
+export class FoldersErrorEvent {
+    /**
+     * Creates a new FoldersErrorEvent instance.
+     * @param {Partial<FoldersErrorEvent>} [$$source = {}] - The source object to create the FoldersErrorEvent.
+     */
+    constructor($$source = {}) {
+        if (!("error" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["error"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FoldersErrorEvent instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {FoldersErrorEvent}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new FoldersErrorEvent(/** @type {Partial<FoldersErrorEvent>} */($$parsedSource));
+    }
+}
+
+/**
  * ImportCompleteEvent is emitted once the whole batch has been processed.
  */
 export class ImportCompleteEvent {
@@ -697,6 +811,13 @@ export class ListFilter {
              * @type {string}
              */
             this["search"] = "";
+        }
+        if (!("virtualFolderID" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["virtualFolderID"] = "";
         }
         if (!("limit" in $$source)) {
             /**

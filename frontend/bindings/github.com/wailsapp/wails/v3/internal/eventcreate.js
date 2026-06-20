@@ -15,9 +15,11 @@ function configure() {
         "classify:complete": $$createType0,
         "classify:error": $$createType1,
         "classify:progress": $$createType2,
-        "import:complete": $$createType3,
-        "import:error": $$createType4,
-        "import:progress": $$createType5,
+        "folders:complete": $$createType3,
+        "folders:error": $$createType4,
+        "import:complete": $$createType5,
+        "import:error": $$createType6,
+        "import:progress": $$createType7,
     }));
 }
 
@@ -25,8 +27,10 @@ function configure() {
 const $$createType0 = services$0.ClassifyCompleteEvent.createFrom;
 const $$createType1 = services$0.ClassifyErrorEvent.createFrom;
 const $$createType2 = services$0.ClassifyProgressEvent.createFrom;
-const $$createType3 = services$0.ImportCompleteEvent.createFrom;
-const $$createType4 = services$0.ImportErrorEvent.createFrom;
-const $$createType5 = services$0.ImportProgressEvent.createFrom;
+const $$createType3 = services$0.FoldersCompleteEvent.createFrom;
+const $$createType4 = services$0.FoldersErrorEvent.createFrom;
+const $$createType5 = services$0.ImportCompleteEvent.createFrom;
+const $$createType6 = services$0.ImportErrorEvent.createFrom;
+const $$createType7 = services$0.ImportProgressEvent.createFrom;
 
 configure();
