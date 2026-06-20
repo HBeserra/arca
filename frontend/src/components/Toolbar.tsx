@@ -1,8 +1,9 @@
-import { FolderInput, FilePlus, Search, Moon, Sun, Monitor, Scissors, Loader2 } from "lucide-react";
+import { FolderInput, FilePlus, Search, Moon, Sun, Monitor, Scissors, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import type { ClassifyStatus } from "@/lib/types";
 
 interface Props {
   search: string;
@@ -14,11 +15,23 @@ interface Props {
   importing: boolean;
   importDone: number;
   importTotal: number;
+  classifyStatus: ClassifyStatus | null;
+  onClassify: () => void;
+  classifying: boolean;
+  classifyDone: number;
+  classifyTotal: number;
 }
 
 export function Toolbar(props: Props) {
-  const { search, onSearch, onImportFolder, onImportFiles, count, total, importing, importDone, importTotal } = props;
-  const pct = importTotal > 0 ? Math.min(100, Math.round((importDone / importTotal) * 100)) : 0;
+  const {
+    search, onSearch, onImportFolder, onImportFiles, count, total,
+    importing, importDone, importTotal,
+    classifyStatus, onClassify, classifying, classifyDone, classifyTotal,
+  } = props;
+
+  const semantic = (classifyStatus?.classified ?? 0) > 0;
+  const allClassified =
+    classifyStatus !== null && classifyStatus.total > 0 && classifyStatus.classified >= classifyStatus.total;
 
   return (
     <div className="flex-shrink-0 border-b">
@@ -33,7 +46,7 @@ export function Toolbar(props: Props) {
           <Input
             value={search}
             onChange={(e) => onSearch(e.target.value)}
-            placeholder="Buscar por nome do arquivo…"
+            placeholder={semantic ? "Busca semântica (o que o bordado mostra)…" : "Buscar por nome do arquivo…"}
             className="h-8 pl-8 text-sm"
           />
         </div>
@@ -43,27 +56,52 @@ export function Toolbar(props: Props) {
         </span>
 
         <div className="ml-auto flex items-center gap-2">
-          <Button variant="outline" size="sm" className="h-8" onClick={onImportFiles} disabled={importing}>
+          {classifyStatus?.available && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8"
+              onClick={onClassify}
+              disabled={classifying || importing || allClassified || (classifyStatus.total ?? 0) === 0}
+              title="Classificar bordados com o modelo de visão local"
+            >
+              <Sparkles className="h-4 w-4" />
+              Classificar IA
+              {classifyStatus.total > 0 && (
+                <span className="tabular-nums text-muted-foreground">
+                  {classifyStatus.classified}/{classifyStatus.total}
+                </span>
+              )}
+            </Button>
+          )}
+          <Button variant="outline" size="sm" className="h-8" onClick={onImportFiles} disabled={importing || classifying}>
             <FilePlus className="h-4 w-4" /> Arquivos
           </Button>
-          <Button size="sm" className="h-8" onClick={onImportFolder} disabled={importing}>
+          <Button size="sm" className="h-8" onClick={onImportFolder} disabled={importing || classifying}>
             <FolderInput className="h-4 w-4" /> Importar pasta
           </Button>
           <ThemeToggle />
         </div>
       </div>
 
-      {importing && (
-        <div className="flex items-center gap-2 px-3 pb-2">
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-            <div className="h-full bg-primary transition-all" style={{ width: `${pct}%` }} />
-          </div>
-          <span className="text-xs tabular-nums text-muted-foreground">
-            {importTotal > 0 ? `${importDone}/${importTotal}` : "preparando…"}
-          </span>
-        </div>
-      )}
+      {importing && <ProgressRow label="Importando" done={importDone} total={importTotal} />}
+      {classifying && <ProgressRow label="Classificando" done={classifyDone} total={classifyTotal} />}
+    </div>
+  );
+}
+
+function ProgressRow({ label, done, total }: { label: string; done: number; total: number }) {
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  return (
+    <div className="flex items-center gap-2 px-3 pb-2">
+      <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+      <span className="text-xs text-muted-foreground w-24">{label}…</span>
+      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+        <div className="h-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-xs tabular-nums text-muted-foreground">
+        {total > 0 ? `${done}/${total}` : "preparando…"}
+      </span>
     </div>
   );
 }

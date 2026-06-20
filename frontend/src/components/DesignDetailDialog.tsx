@@ -1,15 +1,34 @@
+import { useState } from "react";
 import type { ReactNode } from "react";
+import { Sparkles, Loader2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { DesignInfo } from "@/lib/types";
+import * as CatalogService from "../../bindings/stitchvault/services/catalogservice";
 
 interface Props {
   design: DesignInfo | null;
+  classifyAvailable: boolean;
   onClose: () => void;
+  onClassified: (d: DesignInfo) => void;
 }
 
-export function DesignDetailDialog({ design, onClose }: Props) {
+export function DesignDetailDialog({ design, classifyAvailable, onClose, onClassified }: Props) {
+  const [busy, setBusy] = useState(false);
+
+  const classify = async () => {
+    if (!design) return;
+    setBusy(true);
+    try {
+      const updated = await CatalogService.ClassifyDesign(design.id);
+      if (updated) onClassified(updated as unknown as DesignInfo);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Dialog open={design !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-3xl">
@@ -39,17 +58,12 @@ export function DesignDetailDialog({ design, onClose }: Props) {
                   <div className="space-y-1.5">
                     <h4 className="text-xs font-medium text-muted-foreground">Paleta</h4>
                     {design.palette.length === 0 ? (
-                      <p className="text-xs text-muted-foreground/70">
-                        Este formato não armazena cores.
-                      </p>
+                      <p className="text-xs text-muted-foreground/70">Este formato não armazena cores.</p>
                     ) : (
                       <ul className="space-y-1">
                         {design.palette.map((c, i) => (
                           <li key={i} className="flex items-center gap-2 text-xs">
-                            <span
-                              className="h-4 w-4 flex-shrink-0 rounded border border-black/10"
-                              style={{ backgroundColor: c.hex }}
-                            />
+                            <span className="h-4 w-4 flex-shrink-0 rounded border border-black/10" style={{ backgroundColor: c.hex }} />
                             <span className="font-mono text-muted-foreground">{c.hex}</span>
                             {c.description && <span className="truncate">{c.description}</span>}
                           </li>
@@ -58,11 +72,16 @@ export function DesignDetailDialog({ design, onClose }: Props) {
                     )}
                   </div>
 
-                  <div className="space-y-1.5 border-t pt-3">
-                    <h4 className="text-xs font-medium text-muted-foreground">Classificação por IA</h4>
-                    {design.caption || design.tags.length > 0 ? (
+                  <div className="space-y-2 border-t pt-3">
+                    <h4 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                      <Sparkles className="h-3.5 w-3.5" /> Classificação por IA
+                    </h4>
+                    {design.caption ? (
                       <div className="space-y-1.5">
-                        {design.caption && <p className="text-xs">{design.caption}</p>}
+                        <p className="text-xs">{design.caption}</p>
+                        {design.style && (
+                          <p className="text-xs text-muted-foreground">Estilo: {design.style}</p>
+                        )}
                         {design.tags.length > 0 && (
                           <div className="flex flex-wrap gap-1">
                             {design.tags.map((t) => (
@@ -70,9 +89,20 @@ export function DesignDetailDialog({ design, onClose }: Props) {
                             ))}
                           </div>
                         )}
+                        {classifyAvailable && (
+                          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={classify} disabled={busy}>
+                            {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                            Reclassificar
+                          </Button>
+                        )}
                       </div>
+                    ) : classifyAvailable ? (
+                      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={classify} disabled={busy}>
+                        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                        {busy ? "Classificando…" : "Classificar com IA"}
+                      </Button>
                     ) : (
-                      <p className="text-xs text-muted-foreground/70">Disponível na Fase 2 (visão + LLM).</p>
+                      <p className="text-xs text-muted-foreground/70">Modelo de visão indisponível.</p>
                     )}
                   </div>
                 </div>

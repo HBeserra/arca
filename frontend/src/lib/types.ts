@@ -86,3 +86,27 @@ export interface ImportErrorPayload {
   fileName: string;
   error: string;
 }
+
+export interface ClassifyStatus {
+  available: boolean;
+  total: number;
+  classified: number;
+}
+
+export interface ClassifyProgressPayload {
+  done: number;
+  total: number;
+  fileName: string;
+  designID: string;
+}
+
+export interface ClassifyCompletePayload {
+  total: number;
+  classified: number;
+  failed: number;
+}
+
+export interface ClassifyErrorPayload {
+  fileName: string;
+  error: string;
+}

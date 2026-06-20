@@ -14,6 +14,10 @@ import type {
   ImportProgressPayload,
   ImportCompletePayload,
   ImportErrorPayload,
+  ClassifyStatus,
+  ClassifyProgressPayload,
+  ClassifyCompletePayload,
+  ClassifyErrorPayload,
 } from "@/lib/types";
 import * as CatalogService from "../bindings/stitchvault/services/catalogservice";
 
@@ -31,6 +35,8 @@ export default function App() {
   const [selected, setSelected] = useState<DesignInfo | null>(null);
   const [imp, setImp] = useState<ImportState>({ active: false, done: 0, total: 0 });
   const [errors, setErrors] = useState<string[]>([]);
+  const [classifyStatus, setClassifyStatus] = useState<ClassifyStatus | null>(null);
+  const [classifying, setClassifying] = useState<ImportState>({ active: false, done: 0, total: 0 });
 
   const refreshDesigns = useCallback((f: ListFilter) => {
     CatalogService.ListDesigns(f as never).then((d) =>
@@ -45,10 +51,17 @@ export default function App() {
     });
   }, []);
 
-  // Facets once on mount (refreshed after each import).
+  const refreshClassifyStatus = useCallback(() => {
+    CatalogService.ClassifyStatus().then((s) => {
+      if (s) setClassifyStatus(s as unknown as ClassifyStatus);
+    });
+  }, []);
+
+  // Facets + classify status once on mount (refreshed after each import/classify).
   useEffect(() => {
     refreshFacets();
-  }, [refreshFacets]);
+    refreshClassifyStatus();
+  }, [refreshFacets, refreshClassifyStatus]);
 
   // Designs whenever the filter changes (and on mount).
   useEffect(() => {
@@ -58,10 +71,12 @@ export default function App() {
   // Keep latest refs for the one-time event subscription.
   const refreshDesignsRef = useRef(refreshDesigns);
   const refreshFacetsRef = useRef(refreshFacets);
+  const refreshClassifyStatusRef = useRef(refreshClassifyStatus);
   const filterRef = useRef(filter);
   useEffect(() => {
     refreshDesignsRef.current = refreshDesigns;
     refreshFacetsRef.current = refreshFacets;
+    refreshClassifyStatusRef.current = refreshClassifyStatus;
     filterRef.current = filter;
   });
 
@@ -76,11 +91,28 @@ export default function App() {
       setImp({ active: false, done: e.data.total, total: e.data.total });
       refreshDesignsRef.current(filterRef.current);
       refreshFacetsRef.current();
+      refreshClassifyStatusRef.current();
     });
+
+    const offCProgress = Events.On("classify:progress", (e: { data: ClassifyProgressPayload }) => {
+      setClassifying({ active: true, done: e.data.done, total: e.data.total });
+    });
+    const offCError = Events.On("classify:error", (e: { data: ClassifyErrorPayload }) => {
+      setErrors((prev) => [...prev.slice(-19), `${e.data.fileName}: ${e.data.error}`]);
+    });
+    const offCComplete = Events.On("classify:complete", (e: { data: ClassifyCompletePayload }) => {
+      setClassifying({ active: false, done: e.data.total, total: e.data.total });
+      refreshDesignsRef.current(filterRef.current);
+      refreshClassifyStatusRef.current();
+    });
+
     return () => {
       offProgress();
       offError();
       offComplete();
+      offCProgress();
+      offCError();
+      offCComplete();
     };
   }, []);
 
@@ -101,6 +133,12 @@ export default function App() {
     if (paths) startImport(paths as unknown as string[]);
   }, [startImport]);
 
+  const handleClassifyAll = useCallback(() => {
+    setErrors([]);
+    setClassifying({ active: true, done: 0, total: 0 });
+    CatalogService.ClassifyAll();
+  }, []);
+
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground">
@@ -114,6 +152,11 @@ export default function App() {
           importing={imp.active}
           importDone={imp.done}
           importTotal={imp.total}
+          classifyStatus={classifyStatus}
+          onClassify={handleClassifyAll}
+          classifying={classifying.active}
+          classifyDone={classifying.done}
+          classifyTotal={classifying.total}
         />
 
         <div className="flex flex-1 overflow-hidden min-h-0">
@@ -140,7 +183,16 @@ export default function App() {
           </div>
         )}
 
-        <DesignDetailDialog design={selected} onClose={() => setSelected(null)} />
+        <DesignDetailDialog
+          design={selected}
+          classifyAvailable={classifyStatus?.available ?? false}
+          onClose={() => setSelected(null)}
+          onClassified={(d) => {
+            setSelected(d);
+            setDesigns((prev) => prev.map((x) => (x.id === d.id ? d : x)));
+            refreshClassifyStatus();
+          }}
+        />
       </div>
     </TooltipProvider>
   );
