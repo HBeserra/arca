@@ -144,18 +144,18 @@ func (mr *MockStoreMockRecorder) ListDocuments(ctx, sessionID any) *gomock.Call 
 }
 
 // SearchDocuments mocks base method.
-func (m *MockStore) SearchDocuments(ctx context.Context, sessionID uuid.UUID, queryVec []float32) ([]enginebus.Fragment, error) {
+func (m *MockStore) SearchDocuments(ctx context.Context, sessionID uuid.UUID, queryVec []float32, topK int, similarityThreshold float32) ([]enginebus.Fragment, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SearchDocuments", ctx, sessionID, queryVec)
+	ret := m.ctrl.Call(m, "SearchDocuments", ctx, sessionID, queryVec, topK, similarityThreshold)
 	ret0, _ := ret[0].([]enginebus.Fragment)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // SearchDocuments indicates an expected call of SearchDocuments.
-func (mr *MockStoreMockRecorder) SearchDocuments(ctx, sessionID, queryVec any) *gomock.Call {
+func (mr *MockStoreMockRecorder) SearchDocuments(ctx, sessionID, queryVec, topK, similarityThreshold any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SearchDocuments", reflect.TypeOf((*MockStore)(nil).SearchDocuments), ctx, sessionID, queryVec)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SearchDocuments", reflect.TypeOf((*MockStore)(nil).SearchDocuments), ctx, sessionID, queryVec, topK, similarityThreshold)
 }
 
 // UpdateDocument mocks base method.

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageBubble } from "./MessageBubble";
-import type { Message, Citation, ChatTokenPayload, ChatCitationPayload, ChatDonePayload, Session } from "@/lib/types";
+import type { Message, Citation, ChatTokenPayload, ChatCitationPayload, ChatDonePayload, ChatToolPayload, Session } from "@/lib/types";
 import * as QueryService from "../../bindings/changeme/services/queryservice";
 import { Events } from "@wailsio/runtime";
 
@@ -14,7 +14,7 @@ interface ChatPanelProps {
   isStreaming: boolean;
   setIsStreaming: React.Dispatch<React.SetStateAction<boolean>>;
   activeSession: Session | null;
-  queryConfig: { topK: number; similarityThreshold: number; useReranker: boolean; systemPrompt: string; maxTokens: number };
+  queryConfig: { topK: number; similarityThreshold: number; useReranker: boolean; systemPrompt: string; maxTokens: number; temperature: number; topP: number; language: string };
   onToggleConfig: () => void;
   configOpen: boolean;
 }
@@ -38,6 +38,29 @@ export function ChatPanel({
 
   // Wire streaming events.
   useEffect(() => {
+    const offTool = Events.On("chat:tool", (e: { data: ChatToolPayload }) => {
+      const { name, args, result } = e.data;
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (!m.isStreaming) return m;
+          const existing = m.toolCalls ?? [];
+          if (result !== "") {
+            // Update the last pending entry with a matching name.
+            const updated = [...existing];
+            const idx = updated.findLastIndex((tc) => tc.name === name && tc.result === "");
+            if (idx >= 0) {
+              updated[idx] = { ...updated[idx], result };
+            } else {
+              updated.push({ name, args, result });
+            }
+            return { ...m, toolCalls: updated };
+          }
+          // Starting: append a new pending entry.
+          return { ...m, toolCalls: [...existing, { name, args, result: "" }] };
+        })
+      );
+    });
+
     const offReasoning = Events.On("chat:reasoning", (e: { data: { sessionID: string; token: string } }) => {
       setMessages((prev) =>
         prev.map((m) =>
@@ -85,6 +108,7 @@ export function ChatPanel({
     });
 
     return () => {
+      offTool();
       offReasoning();
       offToken();
       offCitation();
@@ -137,6 +161,9 @@ export function ChatPanel({
         useReranker: queryConfig.useReranker,
         systemPrompt: queryConfig.systemPrompt,
         maxTokens: queryConfig.maxTokens,
+        temperature: queryConfig.temperature,
+        topP: queryConfig.topP,
+        language: queryConfig.language,
       } as never);
     } catch (err) {
       setMessages((prev) =>

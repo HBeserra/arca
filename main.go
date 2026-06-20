@@ -44,7 +44,7 @@ func init() {
 }
 
 func main() {
-	logger := slog.Default()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	db, err := sql.Open("duckdb", dbPath())
 	if err != nil {

@@ -130,6 +130,7 @@ func (s *Store) init() error {
 		);`, s.dimensions),
 		`ALTER TABLE chunks ADD COLUMN IF NOT EXISTS file_name VARCHAR;`,
 		`ALTER TABLE chunks ADD COLUMN IF NOT EXISTS start_line INTEGER;`,
+		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS context_used BIGINT DEFAULT 0;`,
 	}
 
 	for _, stmt := range stmts {
@@ -171,9 +172,9 @@ func (s *Store) CreateSession(ctx context.Context, session enginebus.Session) er
 	}
 
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO sessions (id, name, created_at, chat_history, batch_size, batch_overlap)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		m.ID, m.Name, m.CreatedAt, m.ChatHistory, m.BatchSize, m.BatchOverlap,
+		`INSERT INTO sessions (id, name, created_at, chat_history, batch_size, batch_overlap, context_used)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		m.ID, m.Name, m.CreatedAt, m.ChatHistory, m.BatchSize, m.BatchOverlap, m.ContextUsed,
 	)
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
@@ -184,10 +185,10 @@ func (s *Store) CreateSession(ctx context.Context, session enginebus.Session) er
 func (s *Store) GetSession(ctx context.Context, sessionID uuid.UUID) (enginebus.Session, error) {
 	var m dbSession
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, name, created_at, chat_history, batch_size, batch_overlap
+		`SELECT id, name, created_at, chat_history, batch_size, batch_overlap, COALESCE(context_used, 0)
 		 FROM sessions WHERE id = $1`,
 		sessionID.String(),
-	).Scan(&m.ID, &m.Name, &m.CreatedAt, &m.ChatHistory, &m.BatchSize, &m.BatchOverlap)
+	).Scan(&m.ID, &m.Name, &m.CreatedAt, &m.ChatHistory, &m.BatchSize, &m.BatchOverlap, &m.ContextUsed)
 	if err != nil {
 		return enginebus.Session{}, fmt.Errorf("get session: %w", err)
 	}
@@ -203,9 +204,9 @@ func (s *Store) UpdateSession(ctx context.Context, session enginebus.Session) er
 
 	_, err = s.db.ExecContext(ctx,
 		`UPDATE sessions
-		 SET chat_history = $2, batch_size = $3, batch_overlap = $4, name = $5
+		 SET chat_history = $2, batch_size = $3, batch_overlap = $4, name = $5, context_used = $6
 		 WHERE id = $1`,
-		m.ID, m.ChatHistory, m.BatchSize, m.BatchOverlap, m.Name,
+		m.ID, m.ChatHistory, m.BatchSize, m.BatchOverlap, m.Name, m.ContextUsed,
 	)
 	if err != nil {
 		return fmt.Errorf("update session: %w", err)
@@ -226,7 +227,7 @@ func (s *Store) DeleteSession(ctx context.Context, sessionID uuid.UUID) error {
 
 func (s *Store) ListSessions(ctx context.Context) ([]enginebus.Session, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, created_at, chat_history, batch_size, batch_overlap FROM sessions`)
+		`SELECT id, name, created_at, chat_history, batch_size, batch_overlap, COALESCE(context_used, 0) FROM sessions`)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
@@ -235,7 +236,7 @@ func (s *Store) ListSessions(ctx context.Context) ([]enginebus.Session, error) {
 	var sessions []enginebus.Session
 	for rows.Next() {
 		var m dbSession
-		if err := rows.Scan(&m.ID, &m.Name, &m.CreatedAt, &m.ChatHistory, &m.BatchSize, &m.BatchOverlap); err != nil {
+		if err := rows.Scan(&m.ID, &m.Name, &m.CreatedAt, &m.ChatHistory, &m.BatchSize, &m.BatchOverlap, &m.ContextUsed); err != nil {
 			return nil, fmt.Errorf("scan session: %w", err)
 		}
 		sess, err := toSession(m)
@@ -335,7 +336,10 @@ func (s *Store) AddDocumentChunk(ctx context.Context, documentID uuid.UUID, file
 	return nil
 }
 
-func (s *Store) SearchDocuments(ctx context.Context, sessionID uuid.UUID, queryVec []float32) ([]enginebus.Fragment, error) {
+func (s *Store) SearchDocuments(ctx context.Context, sessionID uuid.UUID, queryVec []float32, topK int, similarityThreshold float32) ([]enginebus.Fragment, error) {
+	if topK <= 0 {
+		topK = 10
+	}
 	vecLiteral := floatSliceToLiteral(queryVec)
 	querySQL := fmt.Sprintf(`
 		SELECT c.session_id, c.document_id, d.path, d.content_type,
@@ -345,8 +349,8 @@ func (s *Store) SearchDocuments(ctx context.Context, sessionID uuid.UUID, queryV
 		JOIN documents d ON d.id = c.document_id
 		WHERE c.session_id = $1
 		ORDER BY similarity DESC
-		LIMIT 10
-	`, vecLiteral, s.dimensions)
+		LIMIT %d
+	`, vecLiteral, s.dimensions, topK)
 
 	rows, err := s.db.QueryContext(ctx, querySQL, sessionID.String())
 	if err != nil {
@@ -367,7 +371,9 @@ func (s *Store) SearchDocuments(ctx context.Context, sessionID uuid.UUID, queryV
 		if err != nil {
 			return nil, err
 		}
-		fragments = append(fragments, f)
+		if float32(f.Similarity) >= similarityThreshold {
+			fragments = append(fragments, f)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("search documents rows: %w", err)

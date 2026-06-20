@@ -19,6 +19,7 @@ export default function App() {
     model: {
       model: "gpt-oss-20b",
       systemPrompt: "You are a helpful assistant. Answer questions using the provided context. If the context does not contain the answer, say so.",
+      language: "English",
       temperature: 0.7,
       topP: 0.9,
       maxTokens: 2048,
@@ -49,13 +50,13 @@ export default function App() {
 
   const activeSession = sessions.find((s) => s.id === activeSessionID) ?? null;
 
-  // Estimate context usage: sum all message chars + system prompt, divide by 4 (chars/token)
-  const estimatedTokens = Math.round(
-    (messages.reduce((sum, m) => sum + m.content.length, 0) +
-      config.model.systemPrompt.length) / 4
-  );
-  const contextPct = config.model.contextWindow > 0
-    ? Math.min(100, Math.round((estimatedTokens / config.model.contextWindow) * 100))
+  // Use actual token counts from the last model response; fall back to char estimate.
+  const lastUsage = [...messages].reverse().find((m) => m.usage)?.usage;
+  const contextTokens = lastUsage?.contextTokens
+    ?? Math.round((messages.reduce((sum, m) => sum + m.content.length, 0) + config.model.systemPrompt.length) / 4);
+  const contextWindow = lastUsage?.contextWindow ?? config.model.contextWindow;
+  const contextPct = contextWindow > 0
+    ? Math.min(100, Math.round((contextTokens / contextWindow) * 100))
     : 0;
 
   const queryConfig = {
@@ -64,6 +65,9 @@ export default function App() {
     useReranker: config.rag.useReranker,
     systemPrompt: config.model.systemPrompt,
     maxTokens: config.model.maxTokens,
+    temperature: config.model.temperature,
+    topP: config.model.topP,
+    language: config.model.language,
   };
 
   function handleSessionCreated(sess: Session) {
@@ -145,7 +149,7 @@ export default function App() {
           </div>
         </div>
 
-        <StatusBar model={config.model.model} contextPct={contextPct} contextTokens={estimatedTokens} contextWindow={config.model.contextWindow} />
+        <StatusBar model={config.model.model} contextPct={contextPct} contextTokens={contextTokens} contextWindow={contextWindow} />
       </div>
     </TooltipProvider>
   );

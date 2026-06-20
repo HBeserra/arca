@@ -65,7 +65,7 @@ type (
 		UpdateDocument(ctx context.Context, doc Document) error
 		AddDocumentChunk(ctx context.Context, documentID uuid.UUID, fileName string, startLine int, chunk string, vec Vector) error
 		ListDocuments(ctx context.Context, sessionID uuid.UUID) ([]Document, error)
-		SearchDocuments(ctx context.Context, sessionID uuid.UUID, queryVec []float32) ([]Fragment, error)
+		SearchDocuments(ctx context.Context, sessionID uuid.UUID, queryVec []float32, topK int, similarityThreshold float32) ([]Fragment, error)
 	}
 )
 
@@ -406,7 +406,7 @@ func (e *Engine) AddDocumentTextStream(ctx context.Context, doc AddDocumentStrea
 	return nil
 }
 
-func (e *Engine) SearchDocs(ctx context.Context, sessionID uuid.UUID, query string) ([]Fragment, error) {
+func (e *Engine) SearchDocs(ctx context.Context, sessionID uuid.UUID, query string, topK int, similarityThreshold float32) ([]Fragment, error) {
 	if e.krnEmbed == nil {
 		err := e.Load(ctx)
 		if err != nil {
@@ -426,7 +426,7 @@ func (e *Engine) SearchDocs(ctx context.Context, sessionID uuid.UUID, query stri
 		return nil, fmt.Errorf("no embedding returned for query")
 	}
 
-	fragments, err := e.store.SearchDocuments(ctx, sessionID, vectors.Data[0].Embedding)
+	fragments, err := e.store.SearchDocuments(ctx, sessionID, vectors.Data[0].Embedding, topK, similarityThreshold)
 	if err != nil {
 		return nil, fmt.Errorf("searching documents: %w", err)
 	}

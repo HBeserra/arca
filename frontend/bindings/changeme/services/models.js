@@ -705,6 +705,28 @@ export class QueryConfig {
              */
             this["maxTokens"] = 0;
         }
+        if (!("temperature" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["temperature"] = 0;
+        }
+        if (!("topP" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["topP"] = 0;
+        }
+        if (!("language" in $$source)) {
+            /**
+             * e.g. "English", "Portuguese". Empty = English.
+             * @member
+             * @type {string}
+             */
+            this["language"] = "";
+        }
 
         Object.assign(this, $$source);
     }

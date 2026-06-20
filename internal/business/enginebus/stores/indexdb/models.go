@@ -23,6 +23,7 @@ type dbSession struct {
 	ChatHistory  any // DuckDB returns JSON columns as already-decoded interface{}
 	BatchSize    int
 	BatchOverlap int
+	ContextUsed  int64
 }
 
 type dbDocument struct {
@@ -70,6 +71,7 @@ func toDBSession(s enginebus.Session) (dbSession, error) {
 		ChatHistory:  string(b),
 		BatchSize:    s.BatchSize,
 		BatchOverlap: s.BatchsOverlap,
+		ContextUsed:  int64(s.ContextUsed),
 	}, nil
 }
 
@@ -120,6 +122,7 @@ func toSession(d dbSession) (enginebus.Session, error) {
 		ChatHistory:   history,
 		BatchSize:     d.BatchSize,
 		BatchsOverlap: d.BatchOverlap,
+		ContextUsed:   uint64(d.ContextUsed),
 	}, nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"changeme/internal/business/enginebus"
+	"changeme/internal/business/enginebus/tools/filetool"
 
 	"github.com/google/uuid"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -19,6 +20,9 @@ type QueryConfig struct {
 	UseReranker         bool    `json:"useReranker"`
 	SystemPrompt        string  `json:"systemPrompt"`
 	MaxTokens           int     `json:"maxTokens"`
+	Temperature         float64 `json:"temperature"`
+	TopP                float64 `json:"topP"`
+	Language            string  `json:"language"` // e.g. "English", "Portuguese". Empty = English.
 }
 
 // HistoryMessage is a single chat turn for the frontend.
@@ -67,11 +71,21 @@ type ChatDoneEvent struct {
 	TokensPerSecond  float64 `json:"tokensPerSecond"`
 }
 
+// ChatToolEvent is emitted when the AI invokes a tool.
+// When Result is empty the tool is starting; when non-empty it has finished.
+type ChatToolEvent struct {
+	SessionID string         `json:"sessionID"`
+	Name      string         `json:"name"`
+	Args      map[string]any `json:"args"`
+	Result    string         `json:"result"`
+}
+
 // ChatErrorEvent is emitted when the query pipeline fails.
 type ChatErrorEvent struct {
 	SessionID string `json:"sessionID"`
 	Error     string `json:"error"`
 }
+
 
 // QueryService is the Wails-facing service for RAG-augmented chat.
 type QueryService struct {
@@ -108,7 +122,7 @@ func (q *QueryService) query(sessionID, userMessage string, cfg QueryConfig) err
 	}
 
 	// 1. Retrieve relevant fragments via semantic search.
-	fragments, err := q.eng.SearchDocs(ctx, sid, userMessage)
+	fragments, err := q.eng.SearchDocs(ctx, sid, userMessage, cfg.TopK, cfg.SimilarityThreshold)
 	if err != nil {
 		return fmt.Errorf("query: search: %w", err)
 	}
@@ -163,12 +177,31 @@ func (q *QueryService) query(sessionID, userMessage string, cfg QueryConfig) err
 		systemPrompt = "You are a helpful assistant. Answer questions using the provided context. If the context does not contain the answer, say so."
 	}
 
-	// 3. Stream response — history is managed by the engine in the session store.
+	// 3. Build tool gateway from session documents.
+	docs, err := q.eng.ListDocuments(ctx, sid)
+	if err != nil {
+		return fmt.Errorf("query: list documents: %w", err)
+	}
+	var filePaths []string
+	for _, d := range docs {
+		if d.Type == "file" && d.Path != "" {
+			filePaths = append(filePaths, d.Path)
+		}
+	}
+	listTool, findTool, readTool := filetool.New(filePaths)
+	gateway := enginebus.NewGateway(listTool, findTool, readTool)
+
+	// 4. Stream response — history is managed by the engine in the session store.
 	events, err := q.eng.ChatStream(ctx, enginebus.Question{
-		SessionID: sid,
-		Content:   userMessage,
-		Fragments: fragments,
-		System:    systemPrompt,
+		SessionID:   sid,
+		Content:     userMessage,
+		Fragments:   fragments,
+		System:      systemPrompt,
+		Gateway:     gateway,
+		Language:    cfg.Language,
+		MaxTokens:   cfg.MaxTokens,
+		Temperature: cfg.Temperature,
+		TopP:        cfg.TopP,
 	})
 	if err != nil {
 		return fmt.Errorf("query: chat stream: %w", err)
@@ -183,6 +216,16 @@ func (q *QueryService) query(sessionID, userMessage string, cfg QueryConfig) err
 		if event.Answer != nil {
 			finalAnswer = event.Answer
 			break
+		}
+
+		if event.ToolCall != nil {
+			app.Event.Emit("chat:tool", ChatToolEvent{
+				SessionID: sessionID,
+				Name:      event.ToolCall.Name,
+				Args:      event.ToolCall.Args,
+				Result:    event.ToolCall.Result,
+			})
+			continue
 		}
 
 		if event.Reasoning != "" {
@@ -206,7 +249,7 @@ func (q *QueryService) query(sessionID, userMessage string, cfg QueryConfig) err
 		done.ReasoningTokens = finalAnswer.ReasoningTokens
 		done.CompletionTokens = finalAnswer.CompletionTokens
 		done.OutputTokens = finalAnswer.OutputTokens
-		done.ContextTokens = finalAnswer.ContextTokens
+		done.ContextTokens = int(finalAnswer.TotalContextUsed)
 		done.ContextWindow = finalAnswer.ContextWindow
 		done.TokensPerSecond = finalAnswer.TokensPerSecond
 	}

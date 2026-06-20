@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { Message, ModelUsage } from "@/lib/types";
+import type { Message, ModelUsage, ToolCall } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 function UsageBar({ usage }: { usage: ModelUsage }) {
@@ -102,6 +102,57 @@ function ReasoningBlock({ reasoning, isStreaming }: { reasoning: string; isStrea
   );
 }
 
+function ToolCallsBlock({ toolCalls }: { toolCalls: ToolCall[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const pending = toolCalls.some((tc) => tc.result === "");
+
+  return (
+    <div className="mb-2 rounded-lg border border-border/50 bg-muted/40 text-xs overflow-hidden">
+      <button
+        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        {expanded
+          ? <ChevronDown className="h-3 w-3 flex-shrink-0" />
+          : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
+        <span className="font-medium">
+          {pending ? "Using tools…" : `Tools used (${toolCalls.length})`}
+        </span>
+        {pending && !expanded && (
+          <span className="inline-flex gap-0.5 ml-1">
+            <span className="animate-bounce w-1 h-1 rounded-full bg-current [animation-delay:0ms]" />
+            <span className="animate-bounce w-1 h-1 rounded-full bg-current [animation-delay:150ms]" />
+            <span className="animate-bounce w-1 h-1 rounded-full bg-current [animation-delay:300ms]" />
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <div className="px-3 pb-2 space-y-2">
+          {toolCalls.map((tc, i) => (
+            <div key={i} className="border border-border/40 rounded p-2 bg-background/50">
+              <div className="font-mono font-semibold text-foreground/80 mb-1">{tc.name}</div>
+              <div className="text-muted-foreground mb-1">
+                <span className="font-medium">Args: </span>
+                <span className="font-mono whitespace-pre-wrap break-all">
+                  {JSON.stringify(tc.args, null, 2)}
+                </span>
+              </div>
+              {tc.result === "" ? (
+                <span className="text-muted-foreground italic">Running…</span>
+              ) : (
+                <div className="text-muted-foreground">
+                  <span className="font-medium">Result: </span>
+                  <span className="font-mono whitespace-pre-wrap break-all">{tc.result}</span>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const CITATIONS_VISIBLE = 3;
 
 function CitationsBlock({ citations }: { citations: NonNullable<Message["citations"]> }) {
@@ -161,6 +212,9 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       <div className={cn("max-w-[75%]", isUser ? "items-end" : "items-start")}>
         {!isUser && message.reasoning && (
           <ReasoningBlock reasoning={message.reasoning} isStreaming={message.isStreaming} />
+        )}
+        {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
+          <ToolCallsBlock toolCalls={message.toolCalls} />
         )}
         { (message.content || (!message.reasoning && (message.citations?.length  || 0) > 0)) && 
           <div

@@ -23,7 +23,7 @@ type (
 		EmbedDocument(ctx context.Context, doc Document, text string) error
 		AddDocumentText(ctx context.Context, input AddDocumentInput) error
 		AddDocumentTextStream(ctx context.Context, doc AddDocumentStreamInput) error
-		SearchDocs(ctx context.Context, sessionID uuid.UUID, query string) ([]Fragment, error)
+		SearchDocs(ctx context.Context, sessionID uuid.UUID, query string, topK int, similarityThreshold float32) ([]Fragment, error)
 		Chat(ctx context.Context, q Question) (Answer, error)
 		ChatStream(ctx context.Context, q Question) (<-chan ChatEvent, error)
 		ClearChatHistory(ctx context.Context, sessionID uuid.UUID) error

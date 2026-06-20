@@ -64,6 +64,28 @@ export function ConfigPanel({ config, onChange }: ConfigPanelProps) {
               </div>
 
               <div className="space-y-1.5">
+                <Label>Response Language</Label>
+                <Select value={config.model.language} onValueChange={(v) => updateModel("language", v)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="English">English</SelectItem>
+                    <SelectItem value="Portuguese">Portuguese</SelectItem>
+                    <SelectItem value="Spanish">Spanish</SelectItem>
+                    <SelectItem value="French">French</SelectItem>
+                    <SelectItem value="German">German</SelectItem>
+                    <SelectItem value="Italian">Italian</SelectItem>
+                    <SelectItem value="Japanese">Japanese</SelectItem>
+                    <SelectItem value="Chinese">Chinese</SelectItem>
+                    <SelectItem value="Korean">Korean</SelectItem>
+                    <SelectItem value="Russian">Russian</SelectItem>
+                    <SelectItem value="Arabic">Arabic</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
                 <Label>System Prompt</Label>
                 <Textarea
                   value={config.model.systemPrompt}

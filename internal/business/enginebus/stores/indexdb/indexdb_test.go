@@ -124,7 +124,7 @@ func TestAddChunkAndSearchDocuments(t *testing.T) {
 	require.NoError(t, store.AddDocumentChunk(ctx, doc.ID, "test.txt", 1, "hello world", vec))
 
 	queryVec := []float32{0.1, 0.2, 0.3, 0.4}
-	fragments, err := store.SearchDocuments(ctx, session.ID, queryVec)
+	fragments, err := store.SearchDocuments(ctx, session.ID, queryVec, 10, 0.0)
 	require.NoError(t, err)
 	require.Len(t, fragments, 1)
 	assert.Equal(t, "hello world", fragments[0].Text)

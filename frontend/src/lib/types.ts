@@ -1,5 +1,11 @@
 export type MessageRole = "user" | "assistant";
 
+export interface ToolCall {
+  name: string;
+  args: Record<string, unknown>;
+  result: string;
+}
+
 export interface Citation {
   id: string;
   documentID: string;
@@ -26,6 +32,7 @@ export interface Message {
   reasoning?: string;
   citations?: Citation[];
   usage?: ModelUsage;
+  toolCalls?: ToolCall[];
   isStreaming?: boolean;
   timestamp: Date;
 }
@@ -90,9 +97,18 @@ export interface ChatDonePayload {
   tokensPerSecond: number;
 }
 
+export interface ChatToolPayload {
+  sessionID: string;
+  name: string;
+  args: Record<string, unknown>;
+  result: string;
+}
+
+
 export interface ModelConfig {
   model: string;
   systemPrompt: string;
+  language: string;
   temperature: number;
   topP: number;
   maxTokens: number;
