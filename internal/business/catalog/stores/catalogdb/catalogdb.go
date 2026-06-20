@@ -121,7 +121,7 @@ const designColumns = `id, path, file_name, format, width_mm, height_mm,
 func (s *Store) ListDesigns(ctx context.Context, f catalog.Filter) ([]catalog.Design, error) {
 	where, args := buildWhere(f)
 	q := `SELECT ` + designColumns + ` FROM designs` + where +
-		` ORDER BY created_at DESC, file_name`
+		` ORDER BY created_at DESC, file_name, id` // id breaks ties for stable pagination
 	if f.Limit > 0 {
 		q += fmt.Sprintf(" LIMIT %d", f.Limit)
 	}

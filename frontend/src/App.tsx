@@ -31,6 +31,12 @@ interface ImportState {
   total: number;
 }
 
+// Pagination: the gallery loads designs in pages (infinite scroll) so a 10k+
+// catalog never builds 10k DOM nodes or fetches 10k rows at once. Semantic search
+// returns a single ranked top-K batch (the backend can't offset-paginate it).
+const PAGE_SIZE = 200;
+const SEARCH_LIMIT = 300;
+
 export default function App() {
   const [designs, setDesigns] = useState<DesignInfo[]>([]);
   const [facets, setFacets] = useState<FacetInfo | null>(null);
@@ -44,12 +50,61 @@ export default function App() {
   const [folders, setFolders] = useState<FolderInfo[]>([]);
   const [generatingFolders, setGeneratingFolders] = useState(false);
   const [visionInfo, setVisionInfo] = useState<VisionModelInfo | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [resetToken, setResetToken] = useState(0); // bump to scroll the gallery to top
 
-  const refreshDesigns = useCallback((f: ListFilter) => {
-    CatalogService.ListDesigns(f as never).then((d) =>
-      setDesigns((d ?? []) as unknown as DesignInfo[])
-    );
-    CatalogService.CountDesigns(f as never).then((n) => setCount(n ?? 0));
+  // Latest-value refs so the infinite-scroll callback and event handlers don't
+  // capture stale state.
+  const designsRef = useRef(designs);
+  const countRef = useRef(count);
+  const filterRef = useRef(filter);
+  const loadingMoreRef = useRef(false);
+
+  const hasMore = filter.search.trim() === "" && designs.length < count;
+
+  // loadFirst replaces the result set with page 0 of the given filter.
+  const loadFirst = useCallback((f: ListFilter) => {
+    const searching = f.search.trim() !== "";
+    const limit = searching ? SEARCH_LIMIT : PAGE_SIZE;
+    CatalogService.ListDesigns({ ...f, limit, offset: 0 } as never).then((d) => {
+      const list = (d ?? []) as unknown as DesignInfo[];
+      setDesigns(list);
+      if (searching) setCount(list.length);
+    });
+    if (!searching) CatalogService.CountDesigns(f as never).then((n) => setCount(n ?? 0));
+  }, []);
+
+  // loadMore appends the next page (browse only — semantic search is a single batch).
+  const loadMore = useCallback(() => {
+    if (loadingMoreRef.current) return;
+    const f = filterRef.current;
+    if (f.search.trim() !== "") return;
+    if (designsRef.current.length >= countRef.current) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    CatalogService.ListDesigns({ ...f, limit: PAGE_SIZE, offset: designsRef.current.length } as never)
+      .then((d) => {
+        const more = (d ?? []) as unknown as DesignInfo[];
+        if (more.length) setDesigns((prev) => [...prev, ...more]);
+      })
+      .finally(() => {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      });
+  }, []);
+
+  // reloadInPlace re-fetches the currently loaded window (after import/classify)
+  // without resetting the scroll position.
+  const reloadInPlace = useCallback(() => {
+    const f = filterRef.current;
+    const searching = f.search.trim() !== "";
+    const limit = searching ? SEARCH_LIMIT : Math.max(PAGE_SIZE, designsRef.current.length);
+    CatalogService.ListDesigns({ ...f, limit, offset: 0 } as never).then((d) => {
+      const list = (d ?? []) as unknown as DesignInfo[];
+      setDesigns(list);
+      if (searching) setCount(list.length);
+    });
+    if (!searching) CatalogService.CountDesigns(f as never).then((n) => setCount(n ?? 0));
   }, []);
 
   const refreshFacets = useCallback(() => {
@@ -82,23 +137,25 @@ export default function App() {
     refreshVisionModels();
   }, [refreshFacets, refreshClassifyStatus, refreshFolders, refreshVisionModels]);
 
-  // Designs whenever the filter changes (and on mount).
+  // Reload page 0 and scroll to top whenever the filter changes (and on mount).
   useEffect(() => {
-    refreshDesigns(filter);
-  }, [filter, refreshDesigns]);
+    loadFirst(filter);
+    setResetToken((t) => t + 1);
+  }, [filter, loadFirst]);
 
-  // Keep latest refs for the one-time event subscription.
-  const refreshDesignsRef = useRef(refreshDesigns);
+  // Keep latest refs for the one-time event subscription + infinite scroll.
+  const reloadInPlaceRef = useRef(reloadInPlace);
   const refreshFacetsRef = useRef(refreshFacets);
   const refreshClassifyStatusRef = useRef(refreshClassifyStatus);
   const refreshFoldersRef = useRef(refreshFolders);
-  const filterRef = useRef(filter);
   useEffect(() => {
-    refreshDesignsRef.current = refreshDesigns;
+    designsRef.current = designs;
+    countRef.current = count;
+    filterRef.current = filter;
+    reloadInPlaceRef.current = reloadInPlace;
     refreshFacetsRef.current = refreshFacets;
     refreshClassifyStatusRef.current = refreshClassifyStatus;
     refreshFoldersRef.current = refreshFolders;
-    filterRef.current = filter;
   });
 
   useEffect(() => {
@@ -110,7 +167,7 @@ export default function App() {
     });
     const offComplete = Events.On("import:complete", (e: { data: ImportCompletePayload }) => {
       setImp({ active: false, done: e.data.total, total: e.data.total });
-      refreshDesignsRef.current(filterRef.current);
+      reloadInPlaceRef.current();
       refreshFacetsRef.current();
       refreshClassifyStatusRef.current();
     });
@@ -123,14 +180,14 @@ export default function App() {
     });
     const offCComplete = Events.On("classify:complete", (e: { data: ClassifyCompletePayload }) => {
       setClassifying({ active: false, done: e.data.total, total: e.data.total });
-      refreshDesignsRef.current(filterRef.current);
+      reloadInPlaceRef.current();
       refreshClassifyStatusRef.current();
     });
 
     const offFComplete = Events.On("folders:complete", (_e: { data: FoldersCompletePayload }) => {
       setGeneratingFolders(false);
       refreshFoldersRef.current();
-      refreshDesignsRef.current(filterRef.current);
+      reloadInPlaceRef.current();
     });
     const offFError = Events.On("folders:error", (e: { data: FoldersErrorPayload }) => {
       setGeneratingFolders(false);
@@ -236,7 +293,15 @@ export default function App() {
           </div>
 
           <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-            <GalleryGrid designs={designs} hasAny={(facets?.total ?? 0) > 0} onSelect={setSelected} />
+            <GalleryGrid
+              designs={designs}
+              hasAny={(facets?.total ?? 0) > 0}
+              onSelect={setSelected}
+              onLoadMore={loadMore}
+              hasMore={hasMore}
+              loadingMore={loadingMore}
+              resetToken={resetToken}
+            />
           </div>
         </div>
 

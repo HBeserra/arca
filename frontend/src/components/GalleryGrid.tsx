@@ -1,5 +1,6 @@
-import { ImageOff, FolderInput } from "lucide-react";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { useRef, useState, useEffect, useLayoutEffect } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { ImageOff, FolderInput, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { DesignInfo } from "@/lib/types";
 
@@ -7,40 +8,132 @@ interface Props {
   designs: DesignInfo[];
   hasAny: boolean;
   onSelect: (d: DesignInfo) => void;
+  onLoadMore: () => void;
+  hasMore: boolean;
+  loadingMore: boolean;
+  /** Bumped by the parent to scroll back to the top (e.g. on filter change). */
+  resetToken: number;
 }
 
-export function GalleryGrid({ designs, hasAny, onSelect }: Props) {
-  if (designs.length === 0) {
-    return (
-      <div className="flex flex-1 items-center justify-center p-8">
-        <div className="flex flex-col items-center gap-3 text-center text-muted-foreground max-w-sm">
-          {hasAny ? (
-            <>
-              <ImageOff className="h-10 w-10 opacity-40" />
-              <p className="text-sm">Nenhum bordado corresponde aos filtros.</p>
-            </>
-          ) : (
-            <>
-              <FolderInput className="h-10 w-10 opacity-40" />
-              <p className="text-sm">
-                Importe uma pasta de bordados para começar. O StitchVault gera thumbnails e
-                índices de busca automaticamente.
-              </p>
-            </>
-          )}
-        </div>
-      </div>
-    );
-  }
+// Layout constants — mirror the CSS so windowing math matches what renders.
+const GAP = 12; // gap between cards (px)
+const PAD = 16; // padding around the grid (px)
+const MIN_COL = 180; // minimum card width (px) — matches the old auto-fill grid
 
+// GalleryGrid renders the catalog as a virtualized grid: only the rows currently
+// in (or near) the viewport exist in the DOM, so 10k+ designs stay smooth. Scrolling
+// near the end calls onLoadMore for infinite paging.
+export function GalleryGrid({ designs, hasAny, onSelect, onLoadMore, hasMore, loadingMore, resetToken }: Props) {
+  const parentRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+
+  // Track the scroll container width to compute the responsive column count.
+  useLayoutEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    setWidth(el.clientWidth);
+    const ro = new ResizeObserver((entries) => setWidth(entries[0].contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const avail = Math.max(0, width - 2 * PAD);
+  const cols = Math.max(1, Math.floor((avail + GAP) / (MIN_COL + GAP)));
+  const colW = (avail - (cols - 1) * GAP) / cols;
+  const estRow = (colW > 0 ? colW : MIN_COL) + 78 + GAP; // square image + meta block + gap
+  const rowCount = Math.ceil(designs.length / cols);
+
+  const virt = useVirtualizer({
+    count: rowCount,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => estRow,
+    overscan: 3,
+  });
+
+  // Re-measure when the column count or estimated row height changes (resize).
+  useEffect(() => {
+    virt.measure();
+  }, [cols, estRow, virt]);
+
+  // Scroll back to top when the parent signals a fresh result set.
+  useEffect(() => {
+    parentRef.current?.scrollTo({ top: 0 });
+  }, [resetToken]);
+
+  // Infinite scroll: load the next page once the last rendered row nears the end.
+  const items = virt.getVirtualItems();
+  useEffect(() => {
+    const last = items[items.length - 1];
+    if (last && hasMore && !loadingMore && last.index >= rowCount - 2) {
+      onLoadMore();
+    }
+  }, [items, hasMore, loadingMore, rowCount, onLoadMore]);
+
+  // The scroll container is ALWAYS mounted (even when empty) so parentRef is set
+  // when the width-measuring effect runs; otherwise cols would stay 1 and each
+  // card would stretch to the full viewport width.
   return (
-    <ScrollArea className="flex-1">
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3 p-4">
-        {designs.map((d) => (
-          <DesignCard key={d.id} design={d} onClick={() => onSelect(d)} />
-        ))}
-      </div>
-    </ScrollArea>
+    <div ref={parentRef} className="flex-1 overflow-auto">
+      {designs.length === 0 ? (
+        <div className="flex h-full items-center justify-center p-8">
+          <div className="flex flex-col items-center gap-3 text-center text-muted-foreground max-w-sm">
+            {hasAny ? (
+              <>
+                <ImageOff className="h-10 w-10 opacity-40" />
+                <p className="text-sm">Nenhum bordado corresponde aos filtros.</p>
+              </>
+            ) : (
+              <>
+                <FolderInput className="h-10 w-10 opacity-40" />
+                <p className="text-sm">
+                  Importe uma pasta de bordados para começar. O StitchVault gera thumbnails e
+                  índices de busca automaticamente.
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div style={{ height: virt.getTotalSize(), position: "relative", width: "100%" }}>
+            {items.map((vRow) => {
+              const start = vRow.index * cols;
+              const rowItems = designs.slice(start, start + cols);
+              return (
+                <div
+                  key={vRow.key}
+                  data-index={vRow.index}
+                  ref={virt.measureElement}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${vRow.start}px)`,
+                    display: "grid",
+                    gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                    gap: GAP,
+                    paddingLeft: PAD,
+                    paddingRight: PAD,
+                    paddingTop: vRow.index === 0 ? PAD : 0,
+                    paddingBottom: GAP,
+                  }}
+                >
+                  {rowItems.map((d) => (
+                    <DesignCard key={d.id} design={d} onClick={() => onSelect(d)} />
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+          {loadingMore && (
+            <div className="flex items-center justify-center gap-2 py-4 text-xs text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Carregando mais…
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
