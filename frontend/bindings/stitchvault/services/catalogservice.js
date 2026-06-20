@@ -16,6 +16,38 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as $models from "./models.js";
 
 /**
+ * ClassifyAll classifies, in the background, every design that has no caption yet.
+ * Vision inference is GPU-bound and run one-at-a-time; progress is emitted per
+ * design via classify:* events.
+ * @returns {$CancellablePromise<void>}
+ */
+export function ClassifyAll() {
+    return $Call.ByID(3623439748);
+}
+
+/**
+ * ClassifyDesign classifies a single design on demand and returns it updated.
+ * @param {string} id
+ * @returns {$CancellablePromise<$models.DesignInfo | null>}
+ */
+export function ClassifyDesign(id) {
+    return $Call.ByID(2113077391, id).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType1($result);
+    }));
+}
+
+/**
+ * ClassifyStatus reports whether the vision model is available and how many
+ * designs have been classified.
+ * @returns {$CancellablePromise<$models.ClassifyStatusInfo | null>}
+ */
+export function ClassifyStatus() {
+    return $Call.ByID(3213568687).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType3($result);
+    }));
+}
+
+/**
  * CountDesigns returns how many designs match the filter.
  * @param {$models.ListFilter} filter
  * @returns {$CancellablePromise<number>}
@@ -30,7 +62,7 @@ export function CountDesigns(filter) {
  */
 export function Facets() {
     return $Call.ByID(2572796851).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType1($result);
+        return $$createType5($result);
     }));
 }
 
@@ -41,7 +73,7 @@ export function Facets() {
  */
 export function GetDesign(id) {
     return $Call.ByID(3126174655, id).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType3($result);
+        return $$createType1($result);
     }));
 }
 
@@ -58,13 +90,15 @@ export function ImportPaths(paths) {
 }
 
 /**
- * ListDesigns returns designs matching the filter (paged).
+ * ListDesigns returns designs matching the filter. When a search term is present
+ * and the vision model is wired, results are ranked by semantic similarity;
+ * otherwise the search term is a filename substring filter.
  * @param {$models.ListFilter} filter
  * @returns {$CancellablePromise<$models.DesignInfo[]>}
  */
 export function ListDesigns(filter) {
     return $Call.ByID(87632774, filter).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType4($result);
+        return $$createType6($result);
     }));
 }
 
@@ -74,7 +108,7 @@ export function ListDesigns(filter) {
  */
 export function PickFiles() {
     return $Call.ByID(936146497).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType5($result);
+        return $$createType7($result);
     }));
 }
 
@@ -87,9 +121,11 @@ export function PickFolder() {
 }
 
 // Private type creation functions
-const $$createType0 = $models.FacetInfo.createFrom;
+const $$createType0 = $models.DesignInfo.createFrom;
 const $$createType1 = $Create.Nullable($$createType0);
-const $$createType2 = $models.DesignInfo.createFrom;
+const $$createType2 = $models.ClassifyStatusInfo.createFrom;
 const $$createType3 = $Create.Nullable($$createType2);
-const $$createType4 = $Create.Array($$createType2);
-const $$createType5 = $Create.Array($Create.Any);
+const $$createType4 = $models.FacetInfo.createFrom;
+const $$createType5 = $Create.Nullable($$createType4);
+const $$createType6 = $Create.Array($$createType0);
+const $$createType7 = $Create.Array($Create.Any);

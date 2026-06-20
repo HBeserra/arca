@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"stitchvault/internal/embroidery"
+	"stitchvault/internal/ml"
 )
 
 // Design is one catalogued embroidery file: deterministic metadata extracted from
@@ -78,6 +79,18 @@ type Store interface {
 	CountDesigns(ctx context.Context, f Filter) (int, error)
 	GetDesign(ctx context.Context, id uuid.UUID) (Design, error)
 	Facets(ctx context.Context) (Facets, error)
+
+	// Phase 2.
+	UpdateClassification(ctx context.Context, id uuid.UUID, caption string, tags []string, style string, embedding []float32) error
+	SearchSimilar(ctx context.Context, queryVec []float32, f Filter) ([]Design, error)
+}
+
+// Classifier is the ML capability the engine needs for Phase 2: vision
+// classification and text embedding. Satisfied by *ml.Engine; an interface so the
+// engine can be tested with a fake.
+type Classifier interface {
+	Classify(ctx context.Context, png []byte) (ml.Classification, error)
+	Embed(ctx context.Context, text string) ([]float32, error)
 }
 
 // designNamespace gives stable, path-derived UUIDv5 ids so re-importing the same

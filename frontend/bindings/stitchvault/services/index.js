@@ -8,6 +8,10 @@ export {
 };
 
 export {
+    ClassifyCompleteEvent,
+    ClassifyErrorEvent,
+    ClassifyProgressEvent,
+    ClassifyStatusInfo,
     ColorInfo,
     DesignInfo,
     FacetCountInfo,

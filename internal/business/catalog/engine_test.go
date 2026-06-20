@@ -8,12 +8,15 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 
 	"stitchvault/internal/business/catalog"
 	"stitchvault/internal/business/catalog/stores/catalogdb"
+	"stitchvault/internal/embroidery"
 	"stitchvault/internal/ingest/pyreader"
+	"stitchvault/internal/ml"
 	"stitchvault/internal/render"
 )
 
@@ -125,5 +128,92 @@ func TestEngineImportEndToEnd(t *testing.T) {
 	}
 	if pes != 2 {
 		t.Errorf("count(.pes) = %d, want 2", pes)
+	}
+}
+
+// TestClassifyAndSearchLive verifies the Phase-2 catalog flow end-to-end: classify
+// a design's thumbnail with the vision model, persist caption/tags/embedding, and
+// retrieve it via semantic search. Skipped in -short; needs the local models.
+func TestClassifyAndSearchLive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping live model test in -short mode")
+	}
+
+	root := t.TempDir()
+	db, err := sql.Open("duckdb", filepath.Join(root, "cat.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	store, err := catalogdb.New(discard(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	thumbs := filepath.Join(root, "thumbs")
+	mlEng := ml.New(discard())
+	t.Cleanup(func() { mlEng.Close(context.Background()) })
+	eng := catalog.New(discard(), nil, render.New(), store, thumbs, catalog.WithClassifier(mlEng))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 9*time.Minute)
+	defer cancel()
+
+	// Insert a design with a rendered thumbnail (a red square + green triangle).
+	id := catalog.DesignID("/x/shapes.pes")
+	design := &embroidery.Design{
+		Format:  ".pes",
+		Threads: []embroidery.Thread{{R: 220}, {G: 160}},
+		Stitches: []embroidery.Point{
+			{X: 0, Y: 0, Cmd: embroidery.Stitch}, {X: 40, Y: 0, Cmd: embroidery.Stitch},
+			{X: 40, Y: 40, Cmd: embroidery.Stitch}, {X: 0, Y: 40, Cmd: embroidery.Stitch},
+			{X: 0, Y: 0, Cmd: embroidery.Stitch}, {X: 0, Y: 0, Cmd: embroidery.ColorChange},
+			{X: 60, Y: 0, Cmd: embroidery.Stitch}, {X: 100, Y: 0, Cmd: embroidery.Stitch},
+			{X: 80, Y: 36, Cmd: embroidery.Stitch}, {X: 60, Y: 0, Cmd: embroidery.Stitch},
+			{X: 0, Y: 0, Cmd: embroidery.End},
+		},
+	}
+	thumbPath := filepath.Join(thumbs, id.String()+".png")
+	if err := render.New().Thumbnail(design, thumbPath, 512); err != nil {
+		t.Fatal(err)
+	}
+	w, h := design.SizeMM()
+	if err := store.InsertDesign(ctx, catalog.Design{
+		ID: id, Path: "/x/shapes.pes", FileName: "shapes.pes", Format: ".pes",
+		WidthMM: w, HeightMM: h, StitchCount: design.StitchCount(), ColorCount: design.ColorCount(),
+		ThumbnailPath: thumbPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Classify (loads the vision + embedding models).
+	updated, err := eng.Classify(ctx, id)
+	if err != nil {
+		t.Skipf("vision model unavailable: %v", err)
+	}
+	t.Logf("caption=%q tags=%v style=%q", updated.Caption, updated.Tags, updated.Style)
+	if updated.Caption == "" || len(updated.Tags) == 0 {
+		t.Fatalf("classification incomplete: %+v", updated)
+	}
+
+	// Persisted?
+	got, err := store.GetDesign(ctx, id)
+	if err != nil || got.Caption == "" {
+		t.Fatalf("caption not persisted: %v", err)
+	}
+
+	// Semantic search finds it.
+	res, err := eng.Search(ctx, "geometric shapes square and triangle", catalog.Filter{Limit: 10})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	found := false
+	for _, r := range res {
+		if r.ID == id {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("semantic search returned %d results, none matching the classified design", len(res))
 	}
 }

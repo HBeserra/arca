@@ -38,6 +38,34 @@ type ImportErrorEvent struct {
 	Error    string `json:"error"`
 }
 
+// ClassifyProgressEvent is emitted as each design is classified.
+type ClassifyProgressEvent struct {
+	Done     int    `json:"done"`
+	Total    int    `json:"total"`
+	FileName string `json:"fileName"`
+	DesignID string `json:"designID"`
+}
+
+// ClassifyCompleteEvent is emitted when the classification batch finishes.
+type ClassifyCompleteEvent struct {
+	Total      int `json:"total"`
+	Classified int `json:"classified"`
+	Failed     int `json:"failed"`
+}
+
+// ClassifyErrorEvent is emitted when one design fails to classify.
+type ClassifyErrorEvent struct {
+	FileName string `json:"fileName"`
+	Error    string `json:"error"`
+}
+
+// ClassifyStatusInfo reports classification coverage of the catalog.
+type ClassifyStatusInfo struct {
+	Available  bool `json:"available"`
+	Total      int  `json:"total"`
+	Classified int  `json:"classified"`
+}
+
 // ─── JSON views ─────────────────────────────────────────────────────────────
 
 // DesignInfo is the JSON-serialisable view of a catalogued design.
@@ -218,9 +246,11 @@ func (s *CatalogService) runImport(files []string) {
 		fmt.Sprintf("Imported %d of %d designs.", imported, total), s.appIcon)
 }
 
-// ListDesigns returns designs matching the filter (paged).
+// ListDesigns returns designs matching the filter. When a search term is present
+// and the vision model is wired, results are ranked by semantic similarity;
+// otherwise the search term is a filename substring filter.
 func (s *CatalogService) ListDesigns(filter ListFilter) ([]DesignInfo, error) {
-	designs, err := s.eng.List(context.Background(), toFilter(filter))
+	designs, err := s.eng.Search(context.Background(), filter.Search, toFilter(filter))
 	if err != nil {
 		return nil, fmt.Errorf("catalog: list: %w", err)
 	}
@@ -266,6 +296,94 @@ func (s *CatalogService) Facets() (*FacetInfo, error) {
 		info.Formats = append(info.Formats, FacetCountInfo{Value: fc.Value, Count: fc.Count})
 	}
 	return &info, nil
+}
+
+// ClassifyStatus reports whether the vision model is available and how many
+// designs have been classified.
+func (s *CatalogService) ClassifyStatus() (*ClassifyStatusInfo, error) {
+	info := &ClassifyStatusInfo{Available: s.eng.HasClassifier()}
+	all, err := s.eng.List(context.Background(), catalog.Filter{Limit: 1_000_000})
+	if err != nil {
+		return nil, fmt.Errorf("catalog: classify status: %w", err)
+	}
+	info.Total = len(all)
+	for _, d := range all {
+		if d.Caption != "" {
+			info.Classified++
+		}
+	}
+	return info, nil
+}
+
+// ClassifyDesign classifies a single design on demand and returns it updated.
+func (s *CatalogService) ClassifyDesign(id string) (*DesignInfo, error) {
+	did, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("catalog: invalid design id: %w", err)
+	}
+	d, err := s.eng.Classify(context.Background(), did)
+	if err != nil {
+		return nil, fmt.Errorf("catalog: classify: %w", err)
+	}
+	info := designToInfo(d)
+	return &info, nil
+}
+
+// ClassifyAll classifies, in the background, every design that has no caption yet.
+// Vision inference is GPU-bound and run one-at-a-time; progress is emitted per
+// design via classify:* events.
+func (s *CatalogService) ClassifyAll() error {
+	if !s.eng.HasClassifier() {
+		return fmt.Errorf("catalog: classification unavailable (no vision model)")
+	}
+
+	all, err := s.eng.List(context.Background(), catalog.Filter{Limit: 1_000_000})
+	if err != nil {
+		return fmt.Errorf("catalog: classify all: %w", err)
+	}
+
+	var todo []catalog.Design
+	for _, d := range all {
+		if d.Caption == "" {
+			todo = append(todo, d)
+		}
+	}
+
+	total := len(todo)
+	application.Get().Event.Emit("classify:progress", ClassifyProgressEvent{Done: 0, Total: total})
+	if total == 0 {
+		application.Get().Event.Emit("classify:complete", ClassifyCompleteEvent{})
+		return nil
+	}
+
+	go s.runClassify(todo)
+	return nil
+}
+
+func (s *CatalogService) runClassify(todo []catalog.Design) {
+	ctx := context.Background()
+	total := len(todo)
+	var done, classified, failed int
+
+	for _, d := range todo {
+		_, err := s.eng.Classify(ctx, d.ID)
+		done++
+		if err != nil {
+			failed++
+			application.Get().Event.Emit("classify:error", ClassifyErrorEvent{FileName: d.FileName, Error: err.Error()})
+		} else {
+			classified++
+		}
+		application.Get().Event.Emit("classify:progress", ClassifyProgressEvent{
+			Done: done, Total: total, FileName: d.FileName, DesignID: d.ID.String(),
+		})
+	}
+
+	application.Get().Event.Emit("classify:complete", ClassifyCompleteEvent{
+		Total: total, Classified: classified, Failed: failed,
+	})
+	_ = beeep.Notify("StitchVault — classificação concluída",
+		fmt.Sprintf("Classificados %d de %d designs.", classified, total), s.appIcon)
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────

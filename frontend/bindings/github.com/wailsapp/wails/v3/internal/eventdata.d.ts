@@ -12,6 +12,9 @@ import type * as services$0 from "../../../../../stitchvault/services/models.js"
 declare module "@wailsio/runtime" {
     namespace Events {
         interface CustomEvents {
+            "classify:complete": services$0.ClassifyCompleteEvent;
+            "classify:error": services$0.ClassifyErrorEvent;
+            "classify:progress": services$0.ClassifyProgressEvent;
             "import:complete": services$0.ImportCompleteEvent;
             "import:error": services$0.ImportErrorEvent;
             "import:progress": services$0.ImportProgressEvent;

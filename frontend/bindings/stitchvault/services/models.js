@@ -7,6 +7,186 @@
 import { Create as $Create } from "@wailsio/runtime";
 
 /**
+ * ClassifyCompleteEvent is emitted when the classification batch finishes.
+ */
+export class ClassifyCompleteEvent {
+    /**
+     * Creates a new ClassifyCompleteEvent instance.
+     * @param {Partial<ClassifyCompleteEvent>} [$$source = {}] - The source object to create the ClassifyCompleteEvent.
+     */
+    constructor($$source = {}) {
+        if (!("total" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["total"] = 0;
+        }
+        if (!("classified" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["classified"] = 0;
+        }
+        if (!("failed" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["failed"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ClassifyCompleteEvent instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {ClassifyCompleteEvent}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ClassifyCompleteEvent(/** @type {Partial<ClassifyCompleteEvent>} */($$parsedSource));
+    }
+}
+
+/**
+ * ClassifyErrorEvent is emitted when one design fails to classify.
+ */
+export class ClassifyErrorEvent {
+    /**
+     * Creates a new ClassifyErrorEvent instance.
+     * @param {Partial<ClassifyErrorEvent>} [$$source = {}] - The source object to create the ClassifyErrorEvent.
+     */
+    constructor($$source = {}) {
+        if (!("fileName" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["fileName"] = "";
+        }
+        if (!("error" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["error"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ClassifyErrorEvent instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {ClassifyErrorEvent}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ClassifyErrorEvent(/** @type {Partial<ClassifyErrorEvent>} */($$parsedSource));
+    }
+}
+
+/**
+ * ClassifyProgressEvent is emitted as each design is classified.
+ */
+export class ClassifyProgressEvent {
+    /**
+     * Creates a new ClassifyProgressEvent instance.
+     * @param {Partial<ClassifyProgressEvent>} [$$source = {}] - The source object to create the ClassifyProgressEvent.
+     */
+    constructor($$source = {}) {
+        if (!("done" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["done"] = 0;
+        }
+        if (!("total" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["total"] = 0;
+        }
+        if (!("fileName" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["fileName"] = "";
+        }
+        if (!("designID" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["designID"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ClassifyProgressEvent instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {ClassifyProgressEvent}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ClassifyProgressEvent(/** @type {Partial<ClassifyProgressEvent>} */($$parsedSource));
+    }
+}
+
+/**
+ * ClassifyStatusInfo reports classification coverage of the catalog.
+ */
+export class ClassifyStatusInfo {
+    /**
+     * Creates a new ClassifyStatusInfo instance.
+     * @param {Partial<ClassifyStatusInfo>} [$$source = {}] - The source object to create the ClassifyStatusInfo.
+     */
+    constructor($$source = {}) {
+        if (!("available" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["available"] = false;
+        }
+        if (!("total" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["total"] = 0;
+        }
+        if (!("classified" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["classified"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ClassifyStatusInfo instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {ClassifyStatusInfo}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ClassifyStatusInfo(/** @type {Partial<ClassifyStatusInfo>} */($$parsedSource));
+    }
+}
+
+/**
  * ColorInfo is one palette swatch.
  */
 export class ColorInfo {

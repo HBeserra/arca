@@ -17,6 +17,7 @@ import (
 	"stitchvault/internal/business/catalog"
 	"stitchvault/internal/business/catalog/stores/catalogdb"
 	"stitchvault/internal/ingest/pyreader"
+	"stitchvault/internal/ml"
 	"stitchvault/internal/render"
 	"stitchvault/services"
 
@@ -33,6 +34,9 @@ func init() {
 	application.RegisterEvent[services.ImportProgressEvent]("import:progress")
 	application.RegisterEvent[services.ImportCompleteEvent]("import:complete")
 	application.RegisterEvent[services.ImportErrorEvent]("import:error")
+	application.RegisterEvent[services.ClassifyProgressEvent]("classify:progress")
+	application.RegisterEvent[services.ClassifyCompleteEvent]("classify:complete")
+	application.RegisterEvent[services.ClassifyErrorEvent]("classify:error")
 }
 
 func main() {
@@ -60,7 +64,8 @@ func main() {
 	}
 
 	thumbs := thumbsDir()
-	eng := catalog.New(logger, reader, render.New(), store, thumbs)
+	mlEng := ml.New(logger)
+	eng := catalog.New(logger, reader, render.New(), store, thumbs, catalog.WithClassifier(mlEng))
 	catSvc := services.NewCatalogService(eng, appIcon)
 
 	app := application.New(application.Options{

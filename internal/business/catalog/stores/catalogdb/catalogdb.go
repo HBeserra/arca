@@ -8,8 +8,10 @@ package catalogdb
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -73,6 +75,12 @@ func (s *Store) init() error {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return fmt.Errorf("exec %q: %w", stmt[:min(40, len(stmt))], err)
 		}
+	}
+
+	// Vector distance functions (array_cosine_similarity) come from the VSS
+	// extension. Best-effort: semantic search degrades gracefully without it.
+	if _, err := s.db.Exec(`INSTALL vss; LOAD vss;`); err != nil {
+		s.log.Warn("catalogdb: VSS extension unavailable; semantic search disabled", "err", err)
 	}
 	return nil
 }
@@ -191,6 +199,105 @@ func (s *Store) Facets(ctx context.Context) (catalog.Facets, error) {
 		return catalog.Facets{}, fmt.Errorf("facets rows: %w", err)
 	}
 	return fc, nil
+}
+
+// UpdateClassification stores the Phase-2 semantic attributes and the caption
+// embedding for a design. A nil/empty embedding leaves that column untouched-NULL.
+func (s *Store) UpdateClassification(ctx context.Context, id uuid.UUID, caption string, tags []string, style string, embedding []float32) error {
+	if tags == nil {
+		tags = []string{}
+	}
+	tb, err := json.Marshal(tags)
+	if err != nil {
+		return fmt.Errorf("update classification: marshal tags: %w", err)
+	}
+
+	var captionV, styleV any
+	if caption != "" {
+		captionV = caption
+	}
+	if style != "" {
+		styleV = style
+	}
+
+	if len(embedding) == 0 {
+		_, err = s.db.ExecContext(ctx,
+			`UPDATE designs SET caption=$2, tags=$3, style=$4 WHERE id=$1`,
+			id.String(), captionV, string(tb), styleV)
+	} else {
+		// FLOAT[] cannot be bound as a parameter, so interpolate it as a literal.
+		q := fmt.Sprintf(
+			`UPDATE designs SET caption=$2, tags=$3, style=$4, embedding=%s::FLOAT[%d] WHERE id=$1`,
+			floatSliceToLiteral(embedding), len(embedding))
+		_, err = s.db.ExecContext(ctx, q, id.String(), captionV, string(tb), styleV)
+	}
+	if err != nil {
+		return fmt.Errorf("update classification: %w", err)
+	}
+	return nil
+}
+
+// SearchSimilar ranks designs that have an embedding by cosine similarity to
+// queryVec, applying the same structured filters as ListDesigns. Exact search
+// (no ANN index) — fast and precise at a personal-library scale.
+func (s *Store) SearchSimilar(ctx context.Context, queryVec []float32, f catalog.Filter) ([]catalog.Design, error) {
+	if len(queryVec) == 0 {
+		return nil, nil
+	}
+
+	where, args := buildWhere(f)
+	if where == "" {
+		where = " WHERE embedding IS NOT NULL"
+	} else {
+		where += " AND embedding IS NOT NULL"
+	}
+
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+
+	q := fmt.Sprintf(
+		`SELECT %s FROM designs%s
+		 ORDER BY array_cosine_similarity(embedding, %s::FLOAT[%d]) DESC
+		 LIMIT %d`,
+		designColumns, where, floatSliceToLiteral(queryVec), len(queryVec), limit)
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search similar: %w", err)
+	}
+	defer rows.Close()
+
+	var out []catalog.Design
+	for rows.Next() {
+		m, err := scanDesign(rows)
+		if err != nil {
+			return nil, err
+		}
+		d, err := toDesign(m)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("search similar rows: %w", err)
+	}
+	return out, nil
+}
+
+func floatSliceToLiteral(vec []float32) string {
+	var sb strings.Builder
+	sb.WriteByte('[')
+	for i, v := range vec {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		sb.WriteString(strconv.FormatFloat(float64(v), 'g', -1, 32))
+	}
+	sb.WriteByte(']')
+	return sb.String()
 }
 
 // buildWhere turns a Filter into a parameterized WHERE clause (with a leading

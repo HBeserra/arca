@@ -12,15 +12,21 @@ import * as services$0 from "../../../../../stitchvault/services/models.js";
 
 function configure() {
     Object.freeze(Object.assign($Create.Events, {
-        "import:complete": $$createType0,
-        "import:error": $$createType1,
-        "import:progress": $$createType2,
+        "classify:complete": $$createType0,
+        "classify:error": $$createType1,
+        "classify:progress": $$createType2,
+        "import:complete": $$createType3,
+        "import:error": $$createType4,
+        "import:progress": $$createType5,
     }));
 }
 
 // Private type creation functions
-const $$createType0 = services$0.ImportCompleteEvent.createFrom;
-const $$createType1 = services$0.ImportErrorEvent.createFrom;
-const $$createType2 = services$0.ImportProgressEvent.createFrom;
+const $$createType0 = services$0.ClassifyCompleteEvent.createFrom;
+const $$createType1 = services$0.ClassifyErrorEvent.createFrom;
+const $$createType2 = services$0.ClassifyProgressEvent.createFrom;
+const $$createType3 = services$0.ImportCompleteEvent.createFrom;
+const $$createType4 = services$0.ImportErrorEvent.createFrom;
+const $$createType5 = services$0.ImportProgressEvent.createFrom;
 
 configure();

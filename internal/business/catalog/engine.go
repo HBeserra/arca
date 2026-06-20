@@ -12,17 +12,13 @@ import (
 	"github.com/google/uuid"
 
 	"stitchvault/internal/ingest"
+	"stitchvault/internal/ml"
 	"stitchvault/internal/render"
 )
 
-// DefaultVisionModel is the GGUF vision model used for Phase-2 classification.
-// Swap this constant (or pass WithVisionModel) to use a different VLM; for a bare
-// model id the Kronk resolver auto-discovers the matching mmproj. Unused in the
-// Phase-1 vertical slice — the config point exists so Phase 2 plugs straight in.
-const DefaultVisionModel = "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF"
-
 // Engine wires a Reader, a Renderer and a Store into the catalog use cases:
-// importing a directory of embroidery files and serving the resulting designs.
+// importing a directory of embroidery files, serving the resulting designs, and
+// (when a Classifier is wired) classifying them with the local vision model.
 type Engine struct {
 	log      *slog.Logger
 	reader   ingest.Reader
@@ -32,9 +28,7 @@ type Engine struct {
 	thumbDir  string
 	thumbSize int
 
-	// Phase-2 vision config (held but unused in Phase 1).
-	visionModel   string
-	visionGrammar string
+	cls Classifier // optional; nil disables classification/semantic search
 }
 
 // Option configures the Engine.
@@ -49,31 +43,21 @@ func WithThumbSize(px int) Option {
 	}
 }
 
-// WithVisionModel overrides the Phase-2 vision model source (id or URL).
-func WithVisionModel(source string) Option {
-	return func(e *Engine) {
-		if source != "" {
-			e.visionModel = source
-		}
-	}
-}
-
-// WithVisionGrammar sets the GBNF grammar file constraining Phase-2 classification.
-func WithVisionGrammar(path string) Option {
-	return func(e *Engine) { e.visionGrammar = path }
+// WithClassifier wires the ML capability (vision + embeddings) for Phase 2.
+func WithClassifier(c Classifier) Option {
+	return func(e *Engine) { e.cls = c }
 }
 
 // New creates the catalog engine. thumbDir is where rendered PNGs are written and
 // from where the asset middleware serves them.
 func New(log *slog.Logger, reader ingest.Reader, renderer render.Renderer, store Store, thumbDir string, opts ...Option) *Engine {
 	e := &Engine{
-		log:         log,
-		reader:      reader,
-		renderer:    renderer,
-		store:       store,
-		thumbDir:    thumbDir,
-		thumbSize:   render.DefaultSize,
-		visionModel: DefaultVisionModel,
+		log:       log,
+		reader:    reader,
+		renderer:  renderer,
+		store:     store,
+		thumbDir:  thumbDir,
+		thumbSize: render.DefaultSize,
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -84,8 +68,8 @@ func New(log *slog.Logger, reader ingest.Reader, renderer render.Renderer, store
 // ThumbDir is the directory holding rendered thumbnails (served at /thumb/).
 func (e *Engine) ThumbDir() string { return e.thumbDir }
 
-// VisionModel reports the configured Phase-2 vision model source.
-func (e *Engine) VisionModel() string { return e.visionModel }
+// HasClassifier reports whether classification/semantic search are available.
+func (e *Engine) HasClassifier() bool { return e.cls != nil }
 
 // Scan expands the given roots (files and/or directories) into a de-duplicated
 // list of absolute embroidery file paths.
@@ -210,4 +194,89 @@ func (e *Engine) Get(ctx context.Context, id uuid.UUID) (Design, error) {
 
 func (e *Engine) Facets(ctx context.Context) (Facets, error) {
 	return e.store.Facets(ctx)
+}
+
+// Classify runs vision classification on a design's rendered thumbnail, embeds the
+// resulting description for similarity search, and stores both. Requires a wired
+// Classifier; returns the updated design.
+func (e *Engine) Classify(ctx context.Context, id uuid.UUID) (Design, error) {
+	if e.cls == nil {
+		return Design{}, fmt.Errorf("catalog: classification unavailable (no ML engine)")
+	}
+
+	d, err := e.store.GetDesign(ctx, id)
+	if err != nil {
+		return Design{}, err
+	}
+	png, err := os.ReadFile(d.ThumbnailPath)
+	if err != nil {
+		return Design{}, fmt.Errorf("catalog: read thumbnail %s: %w", d.FileName, err)
+	}
+
+	c, err := e.cls.Classify(ctx, png)
+	if err != nil {
+		return Design{}, err
+	}
+
+	tags := mergeTags(c.Tags, c.Elements)
+	emb, err := e.cls.Embed(ctx, embedText(c))
+	if err != nil {
+		return Design{}, fmt.Errorf("catalog: embed caption: %w", err)
+	}
+
+	if err := e.store.UpdateClassification(ctx, id, c.Caption, tags, c.Style, emb); err != nil {
+		return Design{}, err
+	}
+
+	d.Caption, d.Tags, d.Style = c.Caption, tags, c.Style
+	return d, nil
+}
+
+// Search performs semantic search when a Classifier is available (embeds the
+// query and ranks classified designs by cosine similarity); otherwise it falls
+// back to the filename substring filter.
+func (e *Engine) Search(ctx context.Context, query string, f Filter) ([]Design, error) {
+	query = strings.TrimSpace(query)
+	if e.cls == nil || query == "" {
+		f.Search = query
+		return e.store.ListDesigns(ctx, f)
+	}
+	// Semantic ranking replaces the filename filter.
+	f.Search = ""
+	vec, err := e.cls.Embed(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("catalog: embed query: %w", err)
+	}
+	return e.store.SearchSimilar(ctx, vec, f)
+}
+
+// embedText builds the text embedded for similarity search from a classification.
+func embedText(c ml.Classification) string {
+	parts := []string{c.Caption}
+	if c.Theme != "" {
+		parts = append(parts, c.Theme)
+	}
+	if c.Style != "" {
+		parts = append(parts, c.Style)
+	}
+	parts = append(parts, c.Elements...)
+	parts = append(parts, c.Tags...)
+	return strings.Join(parts, ". ")
+}
+
+// mergeTags lowercases, de-duplicates and concatenates tag lists.
+func mergeTags(lists ...[]string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, list := range lists {
+		for _, s := range list {
+			s = strings.ToLower(strings.TrimSpace(s))
+			if s == "" || seen[s] {
+				continue
+			}
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }
