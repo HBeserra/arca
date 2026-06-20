@@ -216,37 +216,46 @@ func (e *Engine) Classify(ctx context.Context, png []byte) (Classification, erro
 		"json_schema": classificationSchema(),
 		"temperature": 0.2,
 		"top_p":       0.9,
-		"max_tokens":  1024,
+		// Bounded: the structured object is small, and a tight cap limits the
+		// occasional trailing-whitespace runaway the json_schema grammar permits.
+		"max_tokens": 768,
 	}
 
-	ch, err := e.krnVision.ChatStreaming(ctx, d)
+	content, err := e.streamText(ctx, e.krnVision, d)
 	if err != nil {
-		return Classification{}, fmt.Errorf("ml: classify stream: %w", err)
+		return Classification{}, fmt.Errorf("ml: classify: %w", err)
 	}
 
+	var out Classification
+	if err := unmarshalLoose(content, &out); err != nil {
+		return Classification{}, fmt.Errorf("ml: classify: decode %.160q: %w", content, err)
+	}
+	return out, nil
+}
+
+// streamText drains a chat-streaming response into a single string, tolerating
+// nil deltas on non-content events.
+func (e *Engine) streamText(ctx context.Context, krn *kronk.Kronk, d model.D) (string, error) {
+	ch, err := krn.ChatStreaming(ctx, d)
+	if err != nil {
+		return "", fmt.Errorf("stream: %w", err)
+	}
 	var sb strings.Builder
 	for resp := range ch {
 		if len(resp.Choices) == 0 {
 			continue
 		}
 		c := resp.Choices[0]
-		// Delta is a *ResponseMessage and is nil on non-content events (e.g. the
-		// final finish_reason event).
 		content := ""
 		if c.Delta != nil {
 			content = c.Delta.Content
 		}
 		if c.FinishReason() == "error" {
-			return Classification{}, fmt.Errorf("ml: classify: model error: %s", content)
+			return "", fmt.Errorf("model error: %s", content)
 		}
 		sb.WriteString(content)
 	}
-
-	var out Classification
-	if err := json.Unmarshal([]byte(strings.TrimSpace(sb.String())), &out); err != nil {
-		return Classification{}, fmt.Errorf("ml: classify: decode %q: %w", sb.String(), err)
-	}
-	return out, nil
+	return strings.TrimSpace(sb.String()), nil
 }
 
 // Complete generates a text completion constrained to the given JSON schema,
@@ -261,33 +270,72 @@ func (e *Engine) Complete(ctx context.Context, prompt string, schema map[string]
 		"messages":    []model.D{{"role": "user", "content": prompt}},
 		"temperature": 0.3,
 		"top_p":       0.9,
-		"max_tokens":  2048,
+		"max_tokens":  1536,
 	}
 	if len(schema) > 0 {
 		d["json_schema"] = model.D(schema)
 	}
 
-	ch, err := e.krnVision.ChatStreaming(ctx, d)
+	content, err := e.streamText(ctx, e.krnVision, d)
 	if err != nil {
-		return "", fmt.Errorf("ml: complete stream: %w", err)
+		return "", fmt.Errorf("ml: complete: %w", err)
 	}
+	return repairJSON(content), nil
+}
 
-	var sb strings.Builder
-	for resp := range ch {
-		if len(resp.Choices) == 0 {
+// unmarshalLoose parses JSON, retrying with a bracket-balancing repair to survive
+// the trailing-whitespace / unclosed-object runaway the json_schema grammar can
+// produce when the model emits whitespace until max_tokens instead of closing.
+func unmarshalLoose(s string, dst any) error {
+	if err := json.Unmarshal([]byte(s), dst); err == nil {
+		return nil
+	}
+	return json.Unmarshal([]byte(repairJSON(s)), dst)
+}
+
+// repairJSON trims trailing whitespace and appends any missing closing quote and
+// brackets so a truncated-but-otherwise-valid JSON document parses.
+func repairJSON(s string) string {
+	s = strings.TrimRight(s, " \t\r\n")
+
+	var stack []byte
+	inString, escaped := false, false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case ch == '\\':
+				escaped = true
+			case ch == '"':
+				inString = false
+			}
 			continue
 		}
-		c := resp.Choices[0]
-		content := ""
-		if c.Delta != nil {
-			content = c.Delta.Content
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
+			stack = append(stack, '}')
+		case '[':
+			stack = append(stack, ']')
+		case '}', ']':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
 		}
-		if c.FinishReason() == "error" {
-			return "", fmt.Errorf("ml: complete: model error: %s", content)
-		}
-		sb.WriteString(content)
 	}
-	return strings.TrimSpace(sb.String()), nil
+
+	var b strings.Builder
+	b.WriteString(s)
+	if inString {
+		b.WriteByte('"')
+	}
+	for i := len(stack) - 1; i >= 0; i-- {
+		b.WriteByte(stack[i])
+	}
+	return b.String()
 }
 
 // Close unloads any loaded models.

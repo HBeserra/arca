@@ -302,3 +302,70 @@ func TestGenerateFoldersMechanism(t *testing.T) {
 		t.Errorf("after re-generate got %d folders, want 2 (cleared)", len(folders2))
 	}
 }
+
+// TestGenerateFoldersLive runs the full headline flow with real models: classify
+// several distinct designs, then ask the LLM to organize them into folders.
+func TestGenerateFoldersLive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping live model test in -short mode")
+	}
+
+	root := t.TempDir()
+	db, err := sql.Open("duckdb", filepath.Join(root, "cat.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	store, err := catalogdb.New(discard(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thumbs := filepath.Join(root, "thumbs")
+	mlEng := ml.New(discard())
+	t.Cleanup(func() { mlEng.Close(context.Background()) })
+	eng := catalog.New(discard(), nil, render.New(), store, thumbs, catalog.WithClassifier(mlEng))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+	defer cancel()
+
+	shapes := map[string][]embroidery.Point{
+		"square":   {{X: 0, Y: 0, Cmd: embroidery.Stitch}, {X: 50, Y: 0, Cmd: embroidery.Stitch}, {X: 50, Y: 50, Cmd: embroidery.Stitch}, {X: 0, Y: 50, Cmd: embroidery.Stitch}, {X: 0, Y: 0, Cmd: embroidery.Stitch}, {X: 0, Y: 0, Cmd: embroidery.End}},
+		"triangle": {{X: 0, Y: 0, Cmd: embroidery.Stitch}, {X: 50, Y: 0, Cmd: embroidery.Stitch}, {X: 25, Y: 45, Cmd: embroidery.Stitch}, {X: 0, Y: 0, Cmd: embroidery.Stitch}, {X: 0, Y: 0, Cmd: embroidery.End}},
+		"cross":    {{X: 20, Y: 0, Cmd: embroidery.Stitch}, {X: 30, Y: 0, Cmd: embroidery.Stitch}, {X: 30, Y: 20, Cmd: embroidery.Stitch}, {X: 50, Y: 20, Cmd: embroidery.Stitch}, {X: 50, Y: 30, Cmd: embroidery.Stitch}, {X: 30, Y: 30, Cmd: embroidery.Stitch}, {X: 30, Y: 50, Cmd: embroidery.Stitch}, {X: 20, Y: 50, Cmd: embroidery.Stitch}, {X: 20, Y: 30, Cmd: embroidery.Stitch}, {X: 0, Y: 30, Cmd: embroidery.Stitch}, {X: 0, Y: 20, Cmd: embroidery.Stitch}, {X: 20, Y: 20, Cmd: embroidery.Stitch}, {X: 20, Y: 0, Cmd: embroidery.Stitch}, {X: 0, Y: 0, Cmd: embroidery.End}},
+	}
+	for name, pts := range shapes {
+		id := catalog.DesignID("/x/" + name)
+		d := &embroidery.Design{Format: ".pes", Threads: []embroidery.Thread{{R: 200, G: 40, B: 40}}, Stitches: pts}
+		thumb := filepath.Join(thumbs, id.String()+".png")
+		if err := render.New().Thumbnail(d, thumb, 512); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.InsertDesign(ctx, catalog.Design{ID: id, Path: "/x/" + name, FileName: name + ".pes", Format: ".pes", ThumbnailPath: thumb}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := eng.Classify(ctx, id); err != nil {
+			t.Skipf("vision model unavailable: %v", err)
+		}
+	}
+
+	folders, err := eng.GenerateFolders(ctx, 5)
+	if err != nil {
+		t.Fatalf("GenerateFolders: %v", err)
+	}
+	if len(folders) == 0 {
+		t.Fatal("LLM proposed no folders")
+	}
+	total := 0
+	names := make([]string, 0, len(folders))
+	for _, f := range folders {
+		total += f.Count
+		names = append(names, f.Name)
+		if f.Name == "" {
+			t.Error("folder with empty name")
+		}
+	}
+	t.Logf("LLM folders: %v", names)
+	if total != len(shapes) {
+		t.Errorf("assigned %d designs across folders, want %d", total, len(shapes))
+	}
+}
