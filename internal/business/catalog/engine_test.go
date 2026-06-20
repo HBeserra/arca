@@ -239,6 +239,7 @@ func (fakeClassifier) Embed(_ context.Context, text string) ([]float32, error) {
 func (fakeClassifier) Complete(_ context.Context, _ string, _ map[string]any) (string, error) {
 	return `{"folders":[{"name":"Animals","description":"cats dogs and other animals"},{"name":"Shapes","description":"geometric shapes and patterns"}]}`, nil
 }
+func (fakeClassifier) Concurrency() int { return 1 }
 
 // TestGenerateFoldersMechanism verifies taxonomy parsing, folder embedding, cosine
 // assignment and persistence — no models, fully deterministic.

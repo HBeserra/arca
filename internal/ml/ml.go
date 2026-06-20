@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -74,6 +75,7 @@ type Engine struct {
 	libVersion  string
 	embedModel  string
 	visionModel string
+	concurrency int // NSeqMax / worker-pool size for parallel inference
 
 	mu        sync.Mutex
 	sysReady  bool
@@ -90,6 +92,32 @@ func WithEmbedModel(s string) Option { return func(e *Engine) { if s != "" { e.e
 // WithVisionModel overrides the vision model source.
 func WithVisionModel(s string) Option { return func(e *Engine) { if s != "" { e.visionModel = s } } }
 
+// WithConcurrency sets how many inferences run in parallel (model NSeqMax and the
+// caller's worker-pool size). Higher is faster but uses more VRAM per slot.
+func WithConcurrency(n int) Option {
+	return func(e *Engine) {
+		if n > 0 {
+			e.concurrency = n
+		}
+	}
+}
+
+// Concurrency reports the configured parallel-inference width.
+func (e *Engine) Concurrency() int { return e.concurrency }
+
+// defaultConcurrency picks the parallel-inference width. Default is 1 (serial):
+// benchmarked on Apple Silicon, a single 3B vision inference already saturates the
+// GPU, so NSeqMax>1 only adds VRAM contention and is *slower*. Power users with a
+// bigger GPU can opt in via $STITCHVAULT_AI_WORKERS.
+func defaultConcurrency() int {
+	if v := os.Getenv("STITCHVAULT_AI_WORKERS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 1
+}
+
 // New creates the ML engine (no models loaded yet).
 func New(log *slog.Logger, opts ...Option) *Engine {
 	ensureProcessorEnv()
@@ -98,6 +126,7 @@ func New(log *slog.Logger, opts ...Option) *Engine {
 		libVersion:  defaults.LibVersion(""),
 		embedModel:  DefaultEmbedModel,
 		visionModel: DefaultVisionModel,
+		concurrency: defaultConcurrency(),
 	}
 	for _, o := range opts {
 		o(e)
@@ -152,10 +181,14 @@ func (e *Engine) EnsureEmbed(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	krn, err := kronk.New(
+	opts := []model.Option{
 		model.WithModelFiles(mp.ModelFiles),
 		model.WithAutoTune(true),
-	)
+	}
+	if e.concurrency > 1 {
+		opts = append(opts, model.WithNSeqMax(e.concurrency))
+	}
+	krn, err := kronk.New(opts...)
 	if err != nil {
 		return fmt.Errorf("ml: new embed model: %w", err)
 	}
@@ -181,11 +214,21 @@ func (e *Engine) EnsureVision(ctx context.Context) error {
 	if mp.ProjFile == "" {
 		return fmt.Errorf("ml: vision model %q has no mmproj (not a multimodal model?)", e.visionModel)
 	}
-	krn, err := kronk.New(
+	opts := []model.Option{
 		model.WithModelFiles(mp.ModelFiles),
 		model.WithProjFile(mp.ProjFile),
 		model.WithAutoTune(true),
-	)
+	}
+	if e.concurrency > 1 {
+		// Multiple sequence slots + non-incremental cache so several
+		// classifications can run in parallel against this one loaded model.
+		opts = append(opts,
+			model.WithNSeqMax(e.concurrency),
+			model.WithIncrementalCache(false),
+			model.WithContextWindow(8*1024),
+		)
+	}
+	krn, err := kronk.New(opts...)
 	if err != nil {
 		return fmt.Errorf("ml: new vision model: %w", err)
 	}

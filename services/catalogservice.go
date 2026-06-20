@@ -379,22 +379,62 @@ func (s *CatalogService) ClassifyAll() error {
 	return nil
 }
 
+type classifyResult struct {
+	design catalog.Design
+	data   catalog.ClassifyResult
+	err    error
+}
+
 func (s *CatalogService) runClassify(todo []catalog.Design) {
 	ctx := context.Background()
 	total := len(todo)
-	var done, classified, failed int
 
-	for _, d := range todo {
-		_, err := s.eng.Classify(ctx, d.ID)
+	workers := s.eng.Concurrency()
+	if workers < 1 {
+		workers = 1
+	}
+
+	jobs := make(chan catalog.Design)
+	results := make(chan classifyResult)
+
+	// Workers run the GPU-bound vision + embed in parallel (the model is loaded
+	// once with NSeqMax slots); the single collector below serializes DB writes.
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for d := range jobs {
+				data, err := s.eng.ClassifyData(ctx, d)
+				results <- classifyResult{design: d, data: data, err: err}
+			}
+		}()
+	}
+	go func() {
+		for _, d := range todo {
+			jobs <- d
+		}
+		close(jobs)
+	}()
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	var done, classified, failed int
+	for r := range results {
 		done++
-		if err != nil {
+		if r.err == nil {
+			r.err = s.eng.SaveClassification(ctx, r.design.ID, r.data)
+		}
+		if r.err != nil {
 			failed++
-			application.Get().Event.Emit("classify:error", ClassifyErrorEvent{FileName: d.FileName, Error: err.Error()})
+			application.Get().Event.Emit("classify:error", ClassifyErrorEvent{FileName: r.design.FileName, Error: r.err.Error()})
 		} else {
 			classified++
 		}
 		application.Get().Event.Emit("classify:progress", ClassifyProgressEvent{
-			Done: done, Total: total, FileName: d.FileName, DesignID: d.ID.String(),
+			Done: done, Total: total, FileName: r.design.FileName, DesignID: r.design.ID.String(),
 		})
 	}
 

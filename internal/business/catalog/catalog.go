@@ -117,6 +117,7 @@ type Classifier interface {
 	Classify(ctx context.Context, png []byte) (ml.Classification, error)
 	Embed(ctx context.Context, text string) ([]float32, error)
 	Complete(ctx context.Context, prompt string, schema map[string]any) (string, error)
+	Concurrency() int
 }
 
 // designNamespace gives stable, path-derived UUIDv5 ids so re-importing the same

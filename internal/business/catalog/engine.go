@@ -199,39 +199,68 @@ func (e *Engine) Facets(ctx context.Context) (Facets, error) {
 	return e.store.Facets(ctx)
 }
 
-// Classify runs vision classification on a design's rendered thumbnail, embeds the
-// resulting description for similarity search, and stores both. Requires a wired
-// Classifier; returns the updated design.
-func (e *Engine) Classify(ctx context.Context, id uuid.UUID) (Design, error) {
+// Concurrency reports how many designs can be classified in parallel.
+func (e *Engine) Concurrency() int {
 	if e.cls == nil {
-		return Design{}, fmt.Errorf("catalog: classification unavailable (no ML engine)")
+		return 1
 	}
+	if n := e.cls.Concurrency(); n > 0 {
+		return n
+	}
+	return 1
+}
 
+// ClassifyResult is the outcome of classifying a design: semantic attributes plus
+// the caption embedding, ready to persist.
+type ClassifyResult struct {
+	Caption   string
+	Tags      []string
+	Style     string
+	Embedding []float32
+}
+
+// ClassifyData runs vision classification + caption embedding for a design WITHOUT
+// touching the store, so many calls run in parallel (bounded by Concurrency).
+func (e *Engine) ClassifyData(ctx context.Context, d Design) (ClassifyResult, error) {
+	if e.cls == nil {
+		return ClassifyResult{}, fmt.Errorf("catalog: classification unavailable (no ML engine)")
+	}
+	png, err := os.ReadFile(d.ThumbnailPath)
+	if err != nil {
+		return ClassifyResult{}, fmt.Errorf("catalog: read thumbnail %s: %w", d.FileName, err)
+	}
+	c, err := e.cls.Classify(ctx, png)
+	if err != nil {
+		return ClassifyResult{}, err
+	}
+	tags := mergeTags(c.Tags, c.Elements)
+	emb, err := e.cls.Embed(ctx, embedText(c))
+	if err != nil {
+		return ClassifyResult{}, fmt.Errorf("catalog: embed caption: %w", err)
+	}
+	return ClassifyResult{Caption: c.Caption, Tags: tags, Style: c.Style, Embedding: emb}, nil
+}
+
+// SaveClassification persists a ClassifyResult. Call from a single goroutine to
+// keep DuckDB writes serialized.
+func (e *Engine) SaveClassification(ctx context.Context, id uuid.UUID, r ClassifyResult) error {
+	return e.store.UpdateClassification(ctx, id, r.Caption, r.Tags, r.Style, r.Embedding)
+}
+
+// Classify classifies one design and persists it, returning the updated design.
+func (e *Engine) Classify(ctx context.Context, id uuid.UUID) (Design, error) {
 	d, err := e.store.GetDesign(ctx, id)
 	if err != nil {
 		return Design{}, err
 	}
-	png, err := os.ReadFile(d.ThumbnailPath)
-	if err != nil {
-		return Design{}, fmt.Errorf("catalog: read thumbnail %s: %w", d.FileName, err)
-	}
-
-	c, err := e.cls.Classify(ctx, png)
+	r, err := e.ClassifyData(ctx, d)
 	if err != nil {
 		return Design{}, err
 	}
-
-	tags := mergeTags(c.Tags, c.Elements)
-	emb, err := e.cls.Embed(ctx, embedText(c))
-	if err != nil {
-		return Design{}, fmt.Errorf("catalog: embed caption: %w", err)
-	}
-
-	if err := e.store.UpdateClassification(ctx, id, c.Caption, tags, c.Style, emb); err != nil {
+	if err := e.SaveClassification(ctx, id, r); err != nil {
 		return Design{}, err
 	}
-
-	d.Caption, d.Tags, d.Style = c.Caption, tags, c.Style
+	d.Caption, d.Tags, d.Style = r.Caption, r.Tags, r.Style
 	return d, nil
 }
 
