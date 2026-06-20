@@ -1,7 +1,7 @@
 package monitor_test
 
 import (
-	"changeme/internal/business/enginebus/monitor"
+	"stitchvault/internal/business/enginebus/monitor"
 	"context"
 	"fmt"
 	"log/slog"

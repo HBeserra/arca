@@ -10,7 +10,7 @@
 package enginemock_test
 
 import (
-	enginebus "changeme/internal/business/enginebus"
+	enginebus "stitchvault/internal/business/enginebus"
 	context "context"
 	reflect "reflect"
 

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"changeme/internal/business/enginebus"
-	"changeme/internal/business/types/status"
+	"stitchvault/internal/business/enginebus"
+	"stitchvault/internal/business/types/status"
 
 	"github.com/google/uuid"
 )

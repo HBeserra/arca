@@ -1,0 +1,107 @@
+import type { ReactNode } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import type { DesignInfo } from "@/lib/types";
+
+interface Props {
+  design: DesignInfo | null;
+  onClose: () => void;
+}
+
+export function DesignDetailDialog({ design, onClose }: Props) {
+  return (
+    <Dialog open={design !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-3xl">
+        {design && (
+          <>
+            <DialogHeader>
+              <DialogTitle className="truncate pr-8">{design.fileName}</DialogTitle>
+              <DialogDescription className="truncate font-mono text-xs">{design.path}</DialogDescription>
+            </DialogHeader>
+
+            <div className="grid grid-cols-[minmax(0,1fr)_220px] gap-5">
+              <div className="overflow-hidden rounded-md border bg-[#FAFAF8]">
+                <img src={design.thumbnailURL} alt={design.fileName} className="h-full w-full object-contain" />
+              </div>
+
+              <ScrollArea className="max-h-[60vh]">
+                <div className="space-y-4 pr-3">
+                  <dl className="space-y-2 text-sm">
+                    <Row label="Formato" value={<Badge variant="secondary" className="font-mono uppercase">{design.format.replace(".", "")}</Badge>} />
+                    <Row label="Tamanho" value={`${design.widthMM.toFixed(1)} × ${design.heightMM.toFixed(1)} mm`} />
+                    <Row label="Pontos" value={design.stitchCount.toLocaleString()} />
+                    <Row label="Trocas de cor" value={String(design.colorChanges)} />
+                    <Row label="Cores" value={String(design.colorCount)} />
+                    <Row label="Arquivo" value={formatBytes(design.fileSize)} />
+                  </dl>
+
+                  <div className="space-y-1.5">
+                    <h4 className="text-xs font-medium text-muted-foreground">Paleta</h4>
+                    {design.palette.length === 0 ? (
+                      <p className="text-xs text-muted-foreground/70">
+                        Este formato não armazena cores.
+                      </p>
+                    ) : (
+                      <ul className="space-y-1">
+                        {design.palette.map((c, i) => (
+                          <li key={i} className="flex items-center gap-2 text-xs">
+                            <span
+                              className="h-4 w-4 flex-shrink-0 rounded border border-black/10"
+                              style={{ backgroundColor: c.hex }}
+                            />
+                            <span className="font-mono text-muted-foreground">{c.hex}</span>
+                            {c.description && <span className="truncate">{c.description}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5 border-t pt-3">
+                    <h4 className="text-xs font-medium text-muted-foreground">Classificação por IA</h4>
+                    {design.caption || design.tags.length > 0 ? (
+                      <div className="space-y-1.5">
+                        {design.caption && <p className="text-xs">{design.caption}</p>}
+                        {design.tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {design.tags.map((t) => (
+                              <Badge key={t} variant="outline" className="text-[10px]">{t}</Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground/70">Disponível na Fase 2 (visão + LLM).</p>
+                    )}
+                  </div>
+                </div>
+              </ScrollArea>
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function Row({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="font-medium">{value}</dd>
+    </div>
+  );
+}
+
+function formatBytes(n: number): string {
+  if (n <= 0) return "—";
+  const units = ["B", "KB", "MB", "GB"];
+  let v = n;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}

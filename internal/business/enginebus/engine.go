@@ -2,7 +2,7 @@
 package enginebus
 
 import (
-	"changeme/internal/business/types/status"
+	"stitchvault/internal/business/types/status"
 	"context"
 	"fmt"
 	"io"

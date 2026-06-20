@@ -7,18 +7,14 @@ import type { Events } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import type * as services$0 from "../../../../../changeme/services/models.js";
+import type * as services$0 from "../../../../../stitchvault/services/models.js";
 
 declare module "@wailsio/runtime" {
     namespace Events {
         interface CustomEvents {
-            "chat:citation": services$0.ChatCitationEvent;
-            "chat:done": services$0.ChatDoneEvent;
-            "chat:error": services$0.ChatErrorEvent;
-            "chat:token": services$0.ChatTokenEvent;
-            "index:complete": services$0.IndexCompleteEvent;
-            "index:error": services$0.IndexErrorEvent;
-            "index:progress": services$0.IndexProgressEvent;
+            "import:complete": services$0.ImportCompleteEvent;
+            "import:error": services$0.ImportErrorEvent;
+            "import:progress": services$0.ImportProgressEvent;
         }
     }
 }

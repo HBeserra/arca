@@ -6,7 +6,7 @@
         <key>CFBundleName</key>
             <string>My Product</string>
         <key>CFBundleExecutable</key>
-            <string>arca</string>
+            <string>stitchvault</string>
         <key>CFBundleIdentifier</key>
             <string>com.example.kronkgui</string>
         <key>CFBundleVersion</key>

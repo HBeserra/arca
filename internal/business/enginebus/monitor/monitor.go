@@ -1,7 +1,7 @@
 package monitor
 
 import (
-	"changeme/internal/business/enginebus"
+	"stitchvault/internal/business/enginebus"
 	"context"
 	"fmt"
 	"log/slog"

@@ -1,0 +1,327 @@
+package services
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"runtime"
+	"sync"
+	"time"
+
+	"github.com/gen2brain/beeep"
+	"github.com/google/uuid"
+	"github.com/wailsapp/wails/v3/pkg/application"
+
+	"stitchvault/internal/business/catalog"
+)
+
+// ─── Events ─────────────────────────────────────────────────────────────────
+
+// ImportProgressEvent is emitted as each file finishes importing (or fails).
+type ImportProgressEvent struct {
+	Done     int    `json:"done"`
+	Total    int    `json:"total"`
+	FileName string `json:"fileName"`
+	DesignID string `json:"designID"`
+}
+
+// ImportCompleteEvent is emitted once the whole batch has been processed.
+type ImportCompleteEvent struct {
+	Total    int `json:"total"`
+	Imported int `json:"imported"`
+	Failed   int `json:"failed"`
+}
+
+// ImportErrorEvent is emitted when one file fails (the batch continues).
+type ImportErrorEvent struct {
+	FileName string `json:"fileName"`
+	Error    string `json:"error"`
+}
+
+// ─── JSON views ─────────────────────────────────────────────────────────────
+
+// DesignInfo is the JSON-serialisable view of a catalogued design.
+type DesignInfo struct {
+	ID           string      `json:"id"`
+	FileName     string      `json:"fileName"`
+	Path         string      `json:"path"`
+	Format       string      `json:"format"`
+	WidthMM      float64     `json:"widthMM"`
+	HeightMM     float64     `json:"heightMM"`
+	StitchCount  int         `json:"stitchCount"`
+	ColorChanges int         `json:"colorChanges"`
+	ColorCount   int         `json:"colorCount"`
+	Palette      []ColorInfo `json:"palette"`
+	ThumbnailURL string      `json:"thumbnailURL"`
+	FileSize     int64       `json:"fileSize"`
+	CreatedAt    string      `json:"createdAt"`
+
+	// Phase 2 (empty until classification runs).
+	Caption         string   `json:"caption"`
+	Style           string   `json:"style"`
+	Tags            []string `json:"tags"`
+	VirtualFolderID string   `json:"virtualFolderID"`
+}
+
+// ColorInfo is one palette swatch.
+type ColorInfo struct {
+	R           uint8  `json:"r"`
+	G           uint8  `json:"g"`
+	B           uint8  `json:"b"`
+	Hex         string `json:"hex"`
+	Description string `json:"description"`
+}
+
+// FacetInfo drives the filter sidebar.
+type FacetInfo struct {
+	Total       int              `json:"total"`
+	Formats     []FacetCountInfo `json:"formats"`
+	MaxSizeMM   float64          `json:"maxSizeMM"`
+	MaxStitches int              `json:"maxStitches"`
+	MaxColors   int              `json:"maxColors"`
+}
+
+// FacetCountInfo is one facet value and its count.
+type FacetCountInfo struct {
+	Value string `json:"value"`
+	Count int    `json:"count"`
+}
+
+// ListFilter is the JSON-serialisable filter the gallery sends.
+type ListFilter struct {
+	Formats     []string `json:"formats"`
+	MinSizeMM   float64  `json:"minSizeMM"`
+	MaxSizeMM   float64  `json:"maxSizeMM"`
+	MinStitches int      `json:"minStitches"`
+	MaxStitches int      `json:"maxStitches"`
+	MinColors   int      `json:"minColors"`
+	MaxColors   int      `json:"maxColors"`
+	Search      string   `json:"search"`
+	Limit       int      `json:"limit"`
+	Offset      int      `json:"offset"`
+}
+
+// ─── Service ────────────────────────────────────────────────────────────────
+
+// CatalogService is the Wails-facing service for importing and browsing designs.
+type CatalogService struct {
+	eng     *catalog.Engine
+	appIcon []byte
+}
+
+// NewCatalogService returns a new CatalogService.
+func NewCatalogService(eng *catalog.Engine, appIcon []byte) *CatalogService {
+	return &CatalogService{eng: eng, appIcon: appIcon}
+}
+
+// PickFolder opens a native folder dialog and returns the selected path.
+func (s *CatalogService) PickFolder() (string, error) {
+	return application.Get().Dialog.OpenFile().
+		CanChooseDirectories(true).
+		CanChooseFiles(false).
+		SetTitle("Select a folder of embroidery files").
+		PromptForSingleSelection()
+}
+
+// PickFiles opens a native multi-file dialog and returns the selected paths.
+func (s *CatalogService) PickFiles() ([]string, error) {
+	return application.Get().Dialog.OpenFile().
+		SetTitle("Select embroidery files").
+		PromptForMultipleSelection()
+}
+
+type prepResult struct {
+	path   string
+	design catalog.Design
+	err    error
+}
+
+// ImportPaths scans the given files/folders and imports every embroidery file.
+// Parsing + rendering run on a worker pool; persistence and event emission happen
+// on a single collector goroutine (keeping DuckDB writes serialized and progress
+// monotonic). One bad file emits import:error and does not abort the batch.
+func (s *CatalogService) ImportPaths(paths []string) error {
+	files, err := s.eng.Scan(paths)
+	if err != nil {
+		return fmt.Errorf("catalog: scan: %w", err)
+	}
+
+	total := len(files)
+	application.Get().Event.Emit("import:progress", ImportProgressEvent{Done: 0, Total: total})
+	if total == 0 {
+		application.Get().Event.Emit("import:complete", ImportCompleteEvent{})
+		return nil
+	}
+
+	go s.runImport(files)
+	return nil
+}
+
+func (s *CatalogService) runImport(files []string) {
+	ctx := context.Background()
+
+	workers := max(runtime.NumCPU(), 1)
+
+	jobs := make(chan string)
+	prepared := make(chan prepResult)
+
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range jobs {
+				d, err := s.eng.Prepare(ctx, path)
+				prepared <- prepResult{path: path, design: d, err: err}
+			}
+		}()
+	}
+
+	go func() {
+		for _, f := range files {
+			jobs <- f
+		}
+		close(jobs)
+	}()
+
+	go func() {
+		wg.Wait()
+		close(prepared)
+	}()
+
+	total := len(files)
+	var done, imported, failed int
+	for r := range prepared {
+		done++
+		name := filepath.Base(r.path)
+
+		if r.err == nil {
+			r.err = s.eng.Save(ctx, r.design)
+		}
+		if r.err != nil {
+			failed++
+			application.Get().Event.Emit("import:error", ImportErrorEvent{FileName: name, Error: r.err.Error()})
+			application.Get().Event.Emit("import:progress", ImportProgressEvent{Done: done, Total: total, FileName: name})
+			continue
+		}
+
+		imported++
+		application.Get().Event.Emit("import:progress", ImportProgressEvent{
+			Done: done, Total: total, FileName: r.design.FileName, DesignID: r.design.ID.String(),
+		})
+	}
+
+	application.Get().Event.Emit("import:complete", ImportCompleteEvent{
+		Total: total, Imported: imported, Failed: failed,
+	})
+	_ = beeep.Notify("StitchVault — import complete",
+		fmt.Sprintf("Imported %d of %d designs.", imported, total), s.appIcon)
+}
+
+// ListDesigns returns designs matching the filter (paged).
+func (s *CatalogService) ListDesigns(filter ListFilter) ([]DesignInfo, error) {
+	designs, err := s.eng.List(context.Background(), toFilter(filter))
+	if err != nil {
+		return nil, fmt.Errorf("catalog: list: %w", err)
+	}
+	out := make([]DesignInfo, 0, len(designs))
+	for _, d := range designs {
+		out = append(out, designToInfo(d))
+	}
+	return out, nil
+}
+
+// CountDesigns returns how many designs match the filter.
+func (s *CatalogService) CountDesigns(filter ListFilter) (int, error) {
+	return s.eng.Count(context.Background(), toFilter(filter))
+}
+
+// GetDesign returns a single design by id.
+func (s *CatalogService) GetDesign(id string) (*DesignInfo, error) {
+	did, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("catalog: invalid design id: %w", err)
+	}
+	d, err := s.eng.Get(context.Background(), did)
+	if err != nil {
+		return nil, fmt.Errorf("catalog: get %s: %w", id, err)
+	}
+	info := designToInfo(d)
+	return &info, nil
+}
+
+// Facets returns the catalog-wide facets for the filter sidebar.
+func (s *CatalogService) Facets() (*FacetInfo, error) {
+	f, err := s.eng.Facets(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("catalog: facets: %w", err)
+	}
+	info := FacetInfo{
+		Total:       f.Total,
+		MaxSizeMM:   f.MaxSizeMM,
+		MaxStitches: f.MaxStitches,
+		MaxColors:   f.MaxColors,
+	}
+	for _, fc := range f.Formats {
+		info.Formats = append(info.Formats, FacetCountInfo{Value: fc.Value, Count: fc.Count})
+	}
+	return &info, nil
+}
+
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+func toFilter(f ListFilter) catalog.Filter {
+	return catalog.Filter{
+		Formats:     f.Formats,
+		MinSizeMM:   f.MinSizeMM,
+		MaxSizeMM:   f.MaxSizeMM,
+		MinStitches: f.MinStitches,
+		MaxStitches: f.MaxStitches,
+		MinColors:   f.MinColors,
+		MaxColors:   f.MaxColors,
+		Search:      f.Search,
+		Limit:       f.Limit,
+		Offset:      f.Offset,
+	}
+}
+
+func designToInfo(d catalog.Design) DesignInfo {
+	palette := make([]ColorInfo, 0, len(d.Palette))
+	for _, t := range d.Palette {
+		palette = append(palette, ColorInfo{
+			R: t.R, G: t.G, B: t.B,
+			Hex:         fmt.Sprintf("#%02X%02X%02X", t.R, t.G, t.B),
+			Description: t.Description,
+		})
+	}
+
+	vfid := ""
+	if d.VirtualFolderID != nil {
+		vfid = d.VirtualFolderID.String()
+	}
+
+	tags := d.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+
+	return DesignInfo{
+		ID:              d.ID.String(),
+		FileName:        d.FileName,
+		Path:            d.Path,
+		Format:          d.Format,
+		WidthMM:         d.WidthMM,
+		HeightMM:        d.HeightMM,
+		StitchCount:     d.StitchCount,
+		ColorChanges:    d.ColorChanges,
+		ColorCount:      d.ColorCount,
+		Palette:         palette,
+		ThumbnailURL:    "/thumb/" + d.ID.String() + ".png",
+		FileSize:        d.FileSize,
+		CreatedAt:       d.CreatedAt.Format(time.RFC3339),
+		Caption:         d.Caption,
+		Style:           d.Style,
+		Tags:            tags,
+		VirtualFolderID: vfid,
+	}
+}

@@ -1,155 +1,146 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Events } from "@wailsio/runtime";
+import { X } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ChatPanel } from "@/components/ChatPanel";
-import { KnowledgeBasePanel } from "@/components/KnowledgeBasePanel";
-import { ConfigPanel } from "@/components/ConfigPanel";
-import { StatusBar } from "@/components/StatusBar";
-import { cn } from "@/lib/utils";
-import type { Message, AppConfig, Session } from "@/lib/types";
-import * as IndexService from "../bindings/changeme/services/indexservice";
-import * as QueryService from "../bindings/changeme/services/queryservice";
+import { Toolbar } from "@/components/Toolbar";
+import { FilterSidebar } from "@/components/FilterSidebar";
+import { GalleryGrid } from "@/components/GalleryGrid";
+import { DesignDetailDialog } from "@/components/DesignDetailDialog";
+import { emptyFilter } from "@/lib/types";
+import type {
+  DesignInfo,
+  FacetInfo,
+  ListFilter,
+  ImportProgressPayload,
+  ImportCompletePayload,
+  ImportErrorPayload,
+} from "@/lib/types";
+import * as CatalogService from "../bindings/stitchvault/services/catalogservice";
+
+interface ImportState {
+  active: boolean;
+  done: number;
+  total: number;
+}
 
 export default function App() {
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [activeSessionID, setActiveSessionID] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [configOpen, setConfigOpen] = useState(false);
-  const [config, setConfig] = useState<AppConfig>({
-    model: {
-      model: "gpt-oss-20b",
-      systemPrompt: "You are a helpful assistant. Answer questions using the provided context. If the context does not contain the answer, say so.",
-      language: "English",
-      temperature: 0.7,
-      topP: 0.9,
-      maxTokens: 2048,
-      contextWindow: 32768,
-      presencePenalty: 0,
-      frequencyPenalty: 0,
-    },
-    rag: {
-      chunkSize: 512,
-      chunkOverlap: 64,
-      topK: 5,
-      similarityThreshold: 0.3,
-      embeddingModel: "embeddinggemma-300m",
-      useReranker: false,
-    },
-  });
+  const [designs, setDesigns] = useState<DesignInfo[]>([]);
+  const [facets, setFacets] = useState<FacetInfo | null>(null);
+  const [count, setCount] = useState(0);
+  const [filter, setFilter] = useState<ListFilter>(emptyFilter);
+  const [selected, setSelected] = useState<DesignInfo | null>(null);
+  const [imp, setImp] = useState<ImportState>({ active: false, done: 0, total: 0 });
+  const [errors, setErrors] = useState<string[]>([]);
 
-  // Load persisted sessions on mount.
-  useEffect(() => {
-    IndexService.ListSessions().then((list) => {
-      if (list && list.length > 0) {
-        const typed = list.filter(Boolean) as unknown as Session[];
-        setSessions(typed);
-        setActiveSessionID(typed[0].id);
-      }
+  const refreshDesigns = useCallback((f: ListFilter) => {
+    CatalogService.ListDesigns(f as never).then((d) =>
+      setDesigns((d ?? []) as unknown as DesignInfo[])
+    );
+    CatalogService.CountDesigns(f as never).then((n) => setCount(n ?? 0));
+  }, []);
+
+  const refreshFacets = useCallback(() => {
+    CatalogService.Facets().then((f) => {
+      if (f) setFacets(f as unknown as FacetInfo);
     });
   }, []);
 
-  const activeSession = sessions.find((s) => s.id === activeSessionID) ?? null;
-
-  // Use actual token counts from the last model response; fall back to char estimate.
-  const lastUsage = [...messages].reverse().find((m) => m.usage)?.usage;
-  const contextTokens = lastUsage?.contextTokens
-    ?? Math.round((messages.reduce((sum, m) => sum + m.content.length, 0) + config.model.systemPrompt.length) / 4);
-  const contextWindow = lastUsage?.contextWindow ?? config.model.contextWindow;
-  const contextPct = contextWindow > 0
-    ? Math.min(100, Math.round((contextTokens / contextWindow) * 100))
-    : 0;
-
-  const queryConfig = {
-    topK: config.rag.topK,
-    similarityThreshold: config.rag.similarityThreshold,
-    useReranker: config.rag.useReranker,
-    systemPrompt: config.model.systemPrompt,
-    maxTokens: config.model.maxTokens,
-    temperature: config.model.temperature,
-    topP: config.model.topP,
-    language: config.model.language,
-  };
-
-  function handleSessionCreated(sess: Session) {
-    setSessions((prev) => [...prev, sess]);
-  }
-
-  function handleSessionDeleted(id: string) {
-    setSessions((prev) => prev.filter((s) => s.id !== id));
-    if (activeSessionID === id) {
-      setActiveSessionID(sessions.find((s) => s.id !== id)?.id ?? null);
-    }
-  }
-
-  function handleSessionUpdated(sess: Session) {
-    setSessions((prev) => prev.map((s) => (s.id === sess.id ? sess : s)));
-  }
-
-  // Load persisted chat history whenever the active session changes.
+  // Facets once on mount (refreshed after each import).
   useEffect(() => {
-    if (!activeSessionID) {
-      setMessages([]);
-      return;
-    }
-    QueryService.GetHistory(activeSessionID).then((hist) => {
-      if (!hist || hist.length === 0) {
-        setMessages([]);
-        return;
-      }
-      setMessages(
-        hist.map((hm, i) => ({
-          id: `hist-${i}`,
-          role: hm.role as "user" | "assistant",
-          content: hm.content,
-          timestamp: new Date(),
-        }))
-      );
-    });
-  }, [activeSessionID]);
+    refreshFacets();
+  }, [refreshFacets]);
 
-  function handleSessionSelect(id: string) {
-    setActiveSessionID(id);
-  }
+  // Designs whenever the filter changes (and on mount).
+  useEffect(() => {
+    refreshDesigns(filter);
+  }, [filter, refreshDesigns]);
+
+  // Keep latest refs for the one-time event subscription.
+  const refreshDesignsRef = useRef(refreshDesigns);
+  const refreshFacetsRef = useRef(refreshFacets);
+  const filterRef = useRef(filter);
+  useEffect(() => {
+    refreshDesignsRef.current = refreshDesigns;
+    refreshFacetsRef.current = refreshFacets;
+    filterRef.current = filter;
+  });
+
+  useEffect(() => {
+    const offProgress = Events.On("import:progress", (e: { data: ImportProgressPayload }) => {
+      setImp({ active: true, done: e.data.done, total: e.data.total });
+    });
+    const offError = Events.On("import:error", (e: { data: ImportErrorPayload }) => {
+      setErrors((prev) => [...prev.slice(-19), `${e.data.fileName}: ${e.data.error}`]);
+    });
+    const offComplete = Events.On("import:complete", (e: { data: ImportCompletePayload }) => {
+      setImp({ active: false, done: e.data.total, total: e.data.total });
+      refreshDesignsRef.current(filterRef.current);
+      refreshFacetsRef.current();
+    });
+    return () => {
+      offProgress();
+      offError();
+      offComplete();
+    };
+  }, []);
+
+  const startImport = useCallback((paths: string[]) => {
+    if (!paths || paths.length === 0) return;
+    setErrors([]);
+    setImp({ active: true, done: 0, total: 0 });
+    CatalogService.ImportPaths(paths as never);
+  }, []);
+
+  const handleImportFolder = useCallback(async () => {
+    const path = await CatalogService.PickFolder();
+    if (path) startImport([path]);
+  }, [startImport]);
+
+  const handleImportFiles = useCallback(async () => {
+    const paths = await CatalogService.PickFiles();
+    if (paths) startImport(paths as unknown as string[]);
+  }, [startImport]);
 
   return (
-    <TooltipProvider>
+    <TooltipProvider delayDuration={300}>
       <div className="flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground">
+        <Toolbar
+          search={filter.search}
+          onSearch={(s) => setFilter((f) => ({ ...f, search: s }))}
+          onImportFolder={handleImportFolder}
+          onImportFiles={handleImportFiles}
+          count={count}
+          total={facets?.total ?? 0}
+          importing={imp.active}
+          importDone={imp.done}
+          importTotal={imp.total}
+        />
+
         <div className="flex flex-1 overflow-hidden min-h-0">
           <div className="w-64 flex-shrink-0 border-r flex flex-col overflow-hidden">
-            <KnowledgeBasePanel
-              sessions={sessions}
-              activeSessionID={activeSessionID}
-              onSessionSelect={handleSessionSelect}
-              onSessionCreated={handleSessionCreated}
-              onSessionDeleted={handleSessionDeleted}
-              onSessionUpdated={handleSessionUpdated}
-            />
+            <FilterSidebar facets={facets} filter={filter} onChange={setFilter} />
           </div>
 
           <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-            <ChatPanel
-              messages={messages}
-              setMessages={setMessages}
-              isStreaming={isStreaming}
-              setIsStreaming={setIsStreaming}
-              activeSession={activeSession}
-              queryConfig={queryConfig}
-              onToggleConfig={() => setConfigOpen((o) => !o)}
-              configOpen={configOpen}
-            />
-          </div>
-
-          <div
-            className={cn(
-              "flex-shrink-0 border-l flex flex-col overflow-hidden transition-all duration-200",
-              configOpen ? "w-72" : "w-0 border-l-0"
-            )}
-          >
-            <ConfigPanel config={config} onChange={setConfig} />
+            <GalleryGrid designs={designs} hasAny={(facets?.total ?? 0) > 0} onSelect={setSelected} />
           </div>
         </div>
 
-        <StatusBar model={config.model.model} contextPct={contextPct} contextTokens={contextTokens} contextWindow={contextWindow} />
+        {errors.length > 0 && (
+          <div className="flex items-start gap-2 border-t bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <div className="flex-1 space-y-0.5 max-h-20 overflow-auto">
+              <p className="font-medium">{errors.length} arquivo(s) falharam ao importar:</p>
+              {errors.map((e, i) => (
+                <p key={i} className="font-mono opacity-80 truncate">{e}</p>
+              ))}
+            </div>
+            <button onClick={() => setErrors([])} className="opacity-70 hover:opacity-100">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
+        <DesignDetailDialog design={selected} onClose={() => setSelected(null)} />
       </div>
     </TooltipProvider>
   );

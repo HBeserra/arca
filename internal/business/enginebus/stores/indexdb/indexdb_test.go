@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"testing"
 
-	"changeme/internal/business/enginebus"
-	"changeme/internal/business/enginebus/stores/indexdb"
-	"changeme/internal/business/types/status"
+	"stitchvault/internal/business/enginebus"
+	"stitchvault/internal/business/enginebus/stores/indexdb"
+	"stitchvault/internal/business/types/status"
 
 	"github.com/google/uuid"
 	_ "github.com/marcboeker/go-duckdb/v2"

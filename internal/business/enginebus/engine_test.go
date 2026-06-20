@@ -1,8 +1,8 @@
 package enginebus_test
 
 import (
-	"changeme/internal/business/enginebus"
-	enginemock_test "changeme/internal/business/enginebus/mocks"
+	"stitchvault/internal/business/enginebus"
+	enginemock_test "stitchvault/internal/business/enginebus/mocks"
 	"context"
 	"log/slog"
 	"strings"
