@@ -9,6 +9,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/marcboeker/go-duckdb/v2 v2.4.3
 	github.com/wailsapp/wails/v3 v3.0.0-alpha.74
+	golang.org/x/image v0.42.0
 )
 
 require (
@@ -149,7 +150,6 @@ require (
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20260212183809-81e46e3db34a // indirect
-	golang.org/x/image v0.42.0 // indirect
 	golang.org/x/mod v0.36.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
