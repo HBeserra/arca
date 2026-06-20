@@ -230,7 +230,7 @@ func fakeEmbed(text string) []float32 {
 	return v
 }
 
-func (fakeClassifier) Classify(_ context.Context, _ []byte) (ml.Classification, error) {
+func (fakeClassifier) Classify(_ context.Context, _ []byte, _ string) (ml.Classification, error) {
 	return ml.Classification{Caption: "x", Tags: []string{"x"}}, nil
 }
 func (fakeClassifier) Embed(_ context.Context, text string) ([]float32, error) {
@@ -239,7 +239,11 @@ func (fakeClassifier) Embed(_ context.Context, text string) ([]float32, error) {
 func (fakeClassifier) Complete(_ context.Context, _ string, _ map[string]any) (string, error) {
 	return `{"folders":[{"name":"Animals","description":"cats dogs and other animals"},{"name":"Shapes","description":"geometric shapes and patterns"}]}`, nil
 }
-func (fakeClassifier) Concurrency() int { return 1 }
+func (fakeClassifier) Concurrency() int            { return 1 }
+func (fakeClassifier) VisionModel() string         { return "fake" }
+func (fakeClassifier) SetVisionModel(_ string)      {}
+func (fakeClassifier) Loaded() bool                { return true }
+func (fakeClassifier) Unload(_ context.Context) error { return nil }
 
 // TestGenerateFoldersMechanism verifies taxonomy parsing, folder embedding, cosine
 // assignment and persistence — no models, fully deterministic.

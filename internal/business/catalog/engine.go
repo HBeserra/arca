@@ -229,7 +229,7 @@ func (e *Engine) ClassifyData(ctx context.Context, d Design) (ClassifyResult, er
 	if err != nil {
 		return ClassifyResult{}, fmt.Errorf("catalog: read thumbnail %s: %w", d.FileName, err)
 	}
-	c, err := e.cls.Classify(ctx, png)
+	c, err := e.cls.Classify(ctx, png, cleanName(d.FileName))
 	if err != nil {
 		return ClassifyResult{}, err
 	}
@@ -297,17 +297,24 @@ func embedText(c ml.Classification) string {
 }
 
 // mergeTags lowercases, de-duplicates and concatenates tag lists.
+// maxTags bounds the tag list (a small VLM can loop the tags array).
+const maxTags = 15
+
 func mergeTags(lists ...[]string) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, list := range lists {
 		for _, s := range list {
 			s = strings.ToLower(strings.TrimSpace(s))
-			if s == "" || seen[s] {
+			// Drop empties, dupes, and run-on "tags" (repetition artifacts).
+			if s == "" || seen[s] || len(s) > 40 || len(strings.Fields(s)) > 4 {
 				continue
 			}
 			seen[s] = true
 			out = append(out, s)
+			if len(out) >= maxTags {
+				return out
+			}
 		}
 	}
 	return out
@@ -489,4 +496,51 @@ func cosine(a, b []float32) float64 {
 		return -1
 	}
 	return dot / (math.Sqrt(na) * math.Sqrt(nb))
+}
+
+// ─── model management ───────────────────────────────────────────────────────
+
+// VisionPresets returns the selectable vision models.
+func (e *Engine) VisionPresets() []ml.Preset { return ml.VisionPresets() }
+
+// CurrentVisionModel returns the active vision model URL.
+func (e *Engine) CurrentVisionModel() string {
+	if e.cls == nil {
+		return ""
+	}
+	return e.cls.VisionModel()
+}
+
+// SetVisionModel switches the vision model and persists the choice. The new model
+// loads on the next classification.
+func (e *Engine) SetVisionModel(ctx context.Context, url string) error {
+	if e.cls == nil {
+		return fmt.Errorf("catalog: model selection unavailable (no ML engine)")
+	}
+	if err := e.store.SetSetting(ctx, "vision_model", url); err != nil {
+		return err
+	}
+	e.cls.SetVisionModel(url)
+	return nil
+}
+
+// ModelsLoaded reports whether ML models are currently in memory.
+func (e *Engine) ModelsLoaded() bool {
+	return e.cls != nil && e.cls.Loaded()
+}
+
+// EjectModels unloads the ML models to free memory; they reload on next use.
+func (e *Engine) EjectModels(ctx context.Context) error {
+	if e.cls == nil {
+		return nil
+	}
+	return e.cls.Unload(ctx)
+}
+
+// cleanName turns a file name into a short subject hint: drops the extension and
+// turns separators into spaces (e.g. "Lily_PrintStitch.pes" -> "Lily PrintStitch").
+func cleanName(fileName string) string {
+	name := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+	name = strings.NewReplacer("_", " ", "-", " ", ".", " ").Replace(name)
+	return strings.Join(strings.Fields(name), " ")
 }

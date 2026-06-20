@@ -57,6 +57,15 @@ export function CountDesigns(filter) {
 }
 
 /**
+ * EjectModels unloads the ML models to free memory. Refuses while classification
+ * or folder generation is running (would unload mid-inference).
+ * @returns {$CancellablePromise<void>}
+ */
+export function EjectModels() {
+    return $Call.ByID(1846236938);
+}
+
+/**
  * Facets returns the catalog-wide facets for the filter sidebar.
  * @returns {$CancellablePromise<$models.FacetInfo | null>}
  */
@@ -140,6 +149,33 @@ export function PickFolder() {
     return $Call.ByID(1191992382);
 }
 
+/**
+ * SetVisionModel selects a model by preset id (loads on next classification).
+ * @param {string} id
+ * @returns {$CancellablePromise<void>}
+ */
+export function SetVisionModel(id) {
+    return $Call.ByID(3100880586, id);
+}
+
+/**
+ * StopClassify cancels a running batch classification (no-op if none is running).
+ * @returns {$CancellablePromise<void>}
+ */
+export function StopClassify() {
+    return $Call.ByID(3654702605);
+}
+
+/**
+ * VisionModels returns the model picker options and the active one.
+ * @returns {$CancellablePromise<$models.VisionModelInfo | null>}
+ */
+export function VisionModels() {
+    return $Call.ByID(2668989021).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType11($result);
+    }));
+}
+
 // Private type creation functions
 const $$createType0 = $models.DesignInfo.createFrom;
 const $$createType1 = $Create.Nullable($$createType0);
@@ -151,3 +187,5 @@ const $$createType6 = $Create.Array($$createType0);
 const $$createType7 = $models.FolderInfo.createFrom;
 const $$createType8 = $Create.Array($$createType7);
 const $$createType9 = $Create.Array($Create.Any);
+const $$createType10 = $models.VisionModelInfo.createFrom;
+const $$createType11 = $Create.Nullable($$createType10);

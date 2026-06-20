@@ -1,9 +1,10 @@
-import { Check, FolderTree, Folder, Sparkles, Loader2, X } from "lucide-react";
+import { Check, FolderTree, Folder, Sparkles, Loader2, X, Cpu, MemoryStick } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import type { FacetInfo, ListFilter, FolderInfo } from "@/lib/types";
+import type { FacetInfo, ListFilter, FolderInfo, VisionModelInfo } from "@/lib/types";
 import { emptyFilter } from "@/lib/types";
 
 interface Props {
@@ -14,6 +15,11 @@ interface Props {
   foldersAvailable: boolean;
   generatingFolders: boolean;
   onGenerateFolders: () => void;
+  visionInfo: VisionModelInfo | null;
+  onSetVisionModel: (id: string) => void;
+  modelsLoaded: boolean;
+  onEjectModels: () => void;
+  aiBusy: boolean;
 }
 
 export function FilterSidebar({
@@ -24,6 +30,11 @@ export function FilterSidebar({
   foldersAvailable,
   generatingFolders,
   onGenerateFolders,
+  visionInfo,
+  onSetVisionModel,
+  modelsLoaded,
+  onEjectModels,
+  aiBusy,
 }: Props) {
   const set = (patch: Partial<ListFilter>) => onChange({ ...filter, ...patch });
 
@@ -174,6 +185,47 @@ export function FilterSidebar({
                   );
                 })}
               </div>
+            )}
+          </section>
+
+          {/* AI vision model picker + eject */}
+          <section className="space-y-1.5 pt-2 border-t">
+            <h3 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <Cpu className="h-3.5 w-3.5" /> Modelo de IA
+            </h3>
+            {visionInfo && visionInfo.models.length > 0 ? (
+              <>
+                <Select value={visionInfo.currentID || undefined} onValueChange={onSetVisionModel} disabled={aiBusy}>
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue placeholder="Selecionar modelo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {visionInfo.models.map((m) => (
+                      <SelectItem key={m.id} value={m.id} className="text-sm">
+                        {m.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] leading-relaxed text-muted-foreground/70">
+                  {visionInfo.models.find((m) => m.id === visionInfo.currentID)?.description ??
+                    "Troca recarrega o modelo na próxima classificação."}
+                </p>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground/70">Modelo de visão indisponível.</p>
+            )}
+            {modelsLoaded && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={onEjectModels}
+                disabled={aiBusy}
+                title="Descarregar o modelo da memória (recarrega no próximo uso)"
+              >
+                <MemoryStick className="h-3 w-3" /> Liberar memória
+              </Button>
             )}
           </section>
         </div>

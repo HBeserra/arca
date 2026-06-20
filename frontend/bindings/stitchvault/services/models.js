@@ -171,6 +171,14 @@ export class ClassifyStatusInfo {
              */
             this["classified"] = 0;
         }
+        if (!("loaded" in $$source)) {
+            /**
+             * models currently in memory (eject available)
+             * @member
+             * @type {boolean}
+             */
+            this["loaded"] = false;
+        }
 
         Object.assign(this, $$source);
     }
@@ -852,9 +860,105 @@ export class ListFilter {
     }
 }
 
+/**
+ * VisionModelInfo is the picker state: the options and which is active.
+ */
+export class VisionModelInfo {
+    /**
+     * Creates a new VisionModelInfo instance.
+     * @param {Partial<VisionModelInfo>} [$$source = {}] - The source object to create the VisionModelInfo.
+     */
+    constructor($$source = {}) {
+        if (!("currentID" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["currentID"] = "";
+        }
+        if (!("models" in $$source)) {
+            /**
+             * @member
+             * @type {VisionModelOption[]}
+             */
+            this["models"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new VisionModelInfo instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {VisionModelInfo}
+     */
+    static createFrom($$source = {}) {
+        const $$createField1_0 = $$createType6;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("models" in $$parsedSource) {
+            $$parsedSource["models"] = $$createField1_0($$parsedSource["models"]);
+        }
+        return new VisionModelInfo(/** @type {Partial<VisionModelInfo>} */($$parsedSource));
+    }
+}
+
+/**
+ * VisionModelOption is one selectable model in the UI picker.
+ */
+export class VisionModelOption {
+    /**
+     * Creates a new VisionModelOption instance.
+     * @param {Partial<VisionModelOption>} [$$source = {}] - The source object to create the VisionModelOption.
+     */
+    constructor($$source = {}) {
+        if (!("id" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["id"] = "";
+        }
+        if (!("label" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["label"] = "";
+        }
+        if (!("description" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["description"] = "";
+        }
+        if (!("url" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["url"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new VisionModelOption instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {VisionModelOption}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new VisionModelOption(/** @type {Partial<VisionModelOption>} */($$parsedSource));
+    }
+}
+
 // Private type creation functions
 const $$createType0 = ColorInfo.createFrom;
 const $$createType1 = $Create.Array($$createType0);
 const $$createType2 = $Create.Array($Create.Any);
 const $$createType3 = FacetCountInfo.createFrom;
 const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = VisionModelOption.createFrom;
+const $$createType6 = $Create.Array($$createType5);

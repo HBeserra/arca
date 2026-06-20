@@ -22,5 +22,7 @@ export {
     ImportCompleteEvent,
     ImportErrorEvent,
     ImportProgressEvent,
-    ListFilter
+    ListFilter,
+    VisionModelInfo,
+    VisionModelOption
 } from "./models.js";

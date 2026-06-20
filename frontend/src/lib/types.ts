@@ -108,6 +108,19 @@ export interface ClassifyStatus {
   available: boolean;
   total: number;
   classified: number;
+  loaded: boolean;
+}
+
+export interface VisionModelOption {
+  id: string;
+  label: string;
+  description: string;
+  url: string;
+}
+
+export interface VisionModelInfo {
+  currentID: string;
+  models: VisionModelOption[];
 }
 
 export interface ClassifyProgressPayload {

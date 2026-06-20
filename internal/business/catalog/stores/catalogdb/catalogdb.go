@@ -69,6 +69,11 @@ func (s *Store) init() error {
 			rule       JSON,
 			created_at TIMESTAMP NOT NULL DEFAULT current_timestamp
 		);`,
+		// Simple key-value app settings (e.g. the chosen vision model).
+		`CREATE TABLE IF NOT EXISTS settings (
+			key   TEXT PRIMARY KEY,
+			value VARCHAR NOT NULL DEFAULT ''
+		);`,
 	}
 
 	for _, stmt := range stmts {
@@ -393,6 +398,31 @@ func (s *Store) ListVirtualFolders(ctx context.Context) ([]catalog.VirtualFolder
 		out = append(out, catalog.VirtualFolder{ID: id, ParentID: pid, Name: name, Count: count})
 	}
 	return out, rows.Err()
+}
+
+// ─── settings ───────────────────────────────────────────────────────────────
+
+// GetSetting returns the value for key, or "" if unset.
+func (s *Store) GetSetting(ctx context.Context, key string) (string, error) {
+	var v string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = $1`, key).Scan(&v)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get setting %q: %w", key, err)
+	}
+	return v, nil
+}
+
+// SetSetting upserts a key-value setting.
+func (s *Store) SetSetting(ctx context.Context, key, value string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO settings (key, value) VALUES ($1, $2)`, key, value)
+	if err != nil {
+		return fmt.Errorf("set setting %q: %w", key, err)
+	}
+	return nil
 }
 
 // decodeFloatSlice converts DuckDB's []interface{}{float...} into []float32.

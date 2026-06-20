@@ -107,17 +107,26 @@ type Store interface {
 	CreateVirtualFolder(ctx context.Context, id uuid.UUID, name string) error
 	AssignFolder(ctx context.Context, designID, folderID uuid.UUID) error
 	ListVirtualFolders(ctx context.Context) ([]VirtualFolder, error)
+
+	// Key-value settings (e.g. the chosen vision model).
+	GetSetting(ctx context.Context, key string) (string, error)
+	SetSetting(ctx context.Context, key, value string) error
 }
 
 // Classifier is the ML capability the engine needs for Phase 2: vision
-// classification, text embedding, and constrained text completion (for proposing
-// the folder taxonomy). Satisfied by *ml.Engine; an interface so the engine can be
-// tested with a fake.
+// classification (with an optional filename hint), text embedding, constrained
+// text completion (folder taxonomy), model selection and unloading. Satisfied by
+// *ml.Engine; an interface so the engine can be tested with a fake.
 type Classifier interface {
-	Classify(ctx context.Context, png []byte) (ml.Classification, error)
+	Classify(ctx context.Context, png []byte, hint string) (ml.Classification, error)
 	Embed(ctx context.Context, text string) ([]float32, error)
 	Complete(ctx context.Context, prompt string, schema map[string]any) (string, error)
 	Concurrency() int
+
+	VisionModel() string
+	SetVisionModel(url string)
+	Loaded() bool
+	Unload(ctx context.Context) error
 }
 
 // designNamespace gives stable, path-derived UUIDv5 ids so re-importing the same

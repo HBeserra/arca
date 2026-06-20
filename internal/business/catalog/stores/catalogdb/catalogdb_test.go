@@ -175,3 +175,25 @@ func TestUpsertIsIdempotent(t *testing.T) {
 		t.Errorf("StitchCount = %d, want updated 222", got.StitchCount)
 	}
 }
+
+func TestSettings(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	if v, err := s.GetSetting(ctx, "vision_model"); err != nil || v != "" {
+		t.Fatalf("unset = %q (err %v), want empty", v, err)
+	}
+	if err := s.SetSetting(ctx, "vision_model", "http://x/a.gguf"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := s.GetSetting(ctx, "vision_model"); v != "http://x/a.gguf" {
+		t.Errorf("get = %q, want http://x/a.gguf", v)
+	}
+	// upsert overwrites
+	if err := s.SetSetting(ctx, "vision_model", "http://y/b.gguf"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := s.GetSetting(ctx, "vision_model"); v != "http://y/b.gguf" {
+		t.Errorf("upsert get = %q, want http://y/b.gguf", v)
+	}
+}

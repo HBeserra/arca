@@ -55,11 +55,15 @@ func ensureProcessorEnv() {
 // Defaults — override via options.
 const (
 	DefaultEmbedModel = "ggml-org/embeddinggemma-300m-qat-q8_0-GGUF/embeddinggemma-300m-qat-Q8_0.gguf"
-	// A full HuggingFace URL is the most reliable source form: it triggers a
-	// direct download with automatic mmproj sibling discovery, independent of the
-	// resolver catalog. Swap the URL (or pass WithVisionModel) for another VLM.
-	DefaultVisionModel = "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
-	EmbedDim           = 768
+	// Vision model presets (full HuggingFace URLs — the reliable source form that
+	// triggers a direct download with automatic mmproj sibling discovery). The
+	// default is the balanced one; users switch via the UI / WithVisionModel.
+	VisionFast       = "https://huggingface.co/ggml-org/SmolVLM2-2.2B-Instruct-GGUF/resolve/main/SmolVLM2-2.2B-Instruct-Q4_K_M.gguf"
+	VisionBalanced   = "https://huggingface.co/ggml-org/Qwen2-VL-2B-Instruct-GGUF/resolve/main/Qwen2-VL-2B-Instruct-Q4_K_M.gguf"
+	VisionQuality    = "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
+	DefaultVisionModel = VisionBalanced
+
+	EmbedDim = 768
 
 	// classifyImageSize is the max edge (px) the thumbnail is downscaled to before
 	// classification. Vision-token count scales with image size and dominates
@@ -80,19 +84,84 @@ type Classification struct {
 	Tags     []string `json:"tags"`
 }
 
+// Preset is a selectable vision model (shown in the UI picker).
+type Preset struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	URL         string `json:"url"`
+}
+
+// VisionPresets returns the selectable vision models, fastest first.
+func VisionPresets() []Preset {
+	return []Preset{
+		{ID: "fast", Label: "Rápido", Description: "SmolVLM2 2.2B — o mais rápido", URL: VisionFast},
+		{ID: "balanced", Label: "Equilibrado", Description: "Qwen2-VL 2B — bom custo/qualidade", URL: VisionBalanced},
+		{ID: "quality", Label: "Qualidade", Description: "Qwen2.5-VL 3B — melhor qualidade, mais lento", URL: VisionQuality},
+	}
+}
+
 // Engine lazily loads and holds the Kronk models. Methods load their model on
 // first use; loads are guarded so concurrent callers wait rather than double-load.
 type Engine struct {
 	log         *slog.Logger
 	libVersion  string
 	embedModel  string
-	visionModel string
-	concurrency int // NSeqMax / worker-pool size for parallel inference
+	visionModel string // desired vision model source (URL)
+	concurrency int    // NSeqMax / worker-pool size for parallel inference
 
-	mu        sync.Mutex
-	sysReady  bool
-	krnEmbed  *kronk.Kronk
-	krnVision *kronk.Kronk
+	mu           sync.Mutex
+	sysReady     bool
+	krnEmbed     *kronk.Kronk
+	krnVision    *kronk.Kronk
+	loadedVision string // URL currently loaded in krnVision (for hot-swap)
+}
+
+// VisionModel reports the desired vision model source.
+func (e *Engine) VisionModel() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.visionModel
+}
+
+// SetVisionModel changes the desired vision model. The switch is lazy: the new
+// model loads on the next classification (EnsureVision reloads when the loaded
+// model no longer matches). Callers must ensure no classification is in flight.
+func (e *Engine) SetVisionModel(url string) {
+	if url == "" {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.visionModel = url
+}
+
+// Loaded reports whether any model is currently loaded in memory.
+func (e *Engine) Loaded() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.krnEmbed != nil || e.krnVision != nil
+}
+
+// Unload frees both models from memory; they reload on demand on the next use.
+func (e *Engine) Unload(ctx context.Context) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var firstErr error
+	if e.krnEmbed != nil {
+		if err := e.krnEmbed.Unload(ctx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		e.krnEmbed = nil
+	}
+	if e.krnVision != nil {
+		if err := e.krnVision.Unload(ctx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		e.krnVision = nil
+		e.loadedVision = ""
+	}
+	return firstErr
 }
 
 // Option configures the Engine.
@@ -213,8 +282,14 @@ func (e *Engine) EnsureEmbed(ctx context.Context) error {
 func (e *Engine) EnsureVision(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.krnVision != nil {
+	if e.krnVision != nil && e.loadedVision == e.visionModel {
 		return nil
+	}
+	if e.krnVision != nil {
+		// The desired model changed — unload the old one before loading the new.
+		_ = e.krnVision.Unload(ctx)
+		e.krnVision = nil
+		e.loadedVision = ""
 	}
 	if err := e.ensureSystem(ctx); err != nil {
 		return err
@@ -245,6 +320,7 @@ func (e *Engine) EnsureVision(ctx context.Context) error {
 		return fmt.Errorf("ml: new vision model: %w", err)
 	}
 	e.krnVision = krn
+	e.loadedVision = e.visionModel
 	e.log.Info("ml: vision model loaded", "source", e.visionModel)
 	return nil
 }
@@ -273,7 +349,7 @@ short lowercase search tags.`
 
 // Classify sends a rendered PNG to the vision model and returns structured
 // attributes, constrained to the schema via Kronk's json_schema grammar.
-func (e *Engine) Classify(ctx context.Context, png []byte) (Classification, error) {
+func (e *Engine) Classify(ctx context.Context, png []byte, hint string) (Classification, error) {
 	if err := e.EnsureVision(ctx); err != nil {
 		return Classification{}, err
 	}
@@ -283,14 +359,25 @@ func (e *Engine) Classify(ctx context.Context, png []byte) (Classification, erro
 		png = small
 	}
 
+	prompt := classifyPrompt
+	if h := strings.TrimSpace(hint); h != "" {
+		prompt += fmt.Sprintf("\n\nThe embroidery file is named %q, which often hints at the subject — use it as a clue but classify what you actually see.", h)
+	}
+
 	d := model.D{
-		"messages":    model.ImageMessage(classifyPrompt, png, "png"),
-		"json_schema": classificationSchema(),
-		"temperature": 0.2,
-		"top_p":       0.9,
-		// Bounded: the structured object is small, and a tight cap limits the
-		// occasional trailing-whitespace runaway the json_schema grammar permits.
-		"max_tokens": 768,
+		"messages":        model.ImageMessage(prompt, png, "png"),
+		"json_schema":     classificationSchema(),
+		"temperature":     0.2,
+		"top_p":           0.9,
+		"enable_thinking": false,
+		// Smaller VLMs (e.g. Qwen2-VL-2B) tend to loop the tags array — the
+		// json_schema grammar can't cap array length. A mild repeat penalty breaks
+		// the loop without starving the output (1.3 + frequency penalty produced
+		// empty captions); mergeTags also dedups/caps downstream.
+		"repeat_penalty": 1.15,
+		// Bounded: the structured object is small, and a tight cap limits any
+		// runaway the grammar still permits.
+		"max_tokens": 512,
 	}
 
 	ictx, cancel := withDefaultTimeout(ctx, 4*time.Minute)
@@ -341,10 +428,11 @@ func (e *Engine) Complete(ctx context.Context, prompt string, schema map[string]
 	}
 
 	d := model.D{
-		"messages":    []model.D{{"role": "user", "content": prompt}},
-		"temperature": 0.3,
-		"top_p":       0.9,
-		"max_tokens":  1536,
+		"messages":       []model.D{{"role": "user", "content": prompt}},
+		"temperature":    0.3,
+		"top_p":          0.9,
+		"repeat_penalty": 1.15,
+		"max_tokens":     1536,
 	}
 	if len(schema) > 0 {
 		d["json_schema"] = model.D(schema)
@@ -414,21 +502,9 @@ func repairJSON(s string) string {
 	return b.String()
 }
 
-// Close unloads any loaded models.
+// Close unloads any loaded models (alias for Unload, for app shutdown).
 func (e *Engine) Close(ctx context.Context) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	var firstErr error
-	for _, krn := range []*kronk.Kronk{e.krnEmbed, e.krnVision} {
-		if krn == nil {
-			continue
-		}
-		if err := krn.Unload(ctx); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	e.krnEmbed, e.krnVision = nil, nil
-	return firstErr
+	return e.Unload(ctx)
 }
 
 // downscalePNG re-encodes a PNG scaled so its longest edge is at most maxEdge.

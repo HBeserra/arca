@@ -64,6 +64,21 @@ type ClassifyStatusInfo struct {
 	Available  bool `json:"available"`
 	Total      int  `json:"total"`
 	Classified int  `json:"classified"`
+	Loaded     bool `json:"loaded"` // models currently in memory (eject available)
+}
+
+// VisionModelOption is one selectable model in the UI picker.
+type VisionModelOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	URL         string `json:"url"`
+}
+
+// VisionModelInfo is the picker state: the options and which is active.
+type VisionModelInfo struct {
+	CurrentID string              `json:"currentID"`
+	Models    []VisionModelOption `json:"models"`
 }
 
 // ─── JSON views ─────────────────────────────────────────────────────────────
@@ -154,6 +169,10 @@ type FoldersErrorEvent struct {
 type CatalogService struct {
 	eng     *catalog.Engine
 	appIcon []byte
+
+	mu             sync.Mutex
+	classifyCancel context.CancelFunc // non-nil while a batch classify runs
+	foldersBusy    bool               // true while folder generation runs
 }
 
 // NewCatalogService returns a new CatalogService.
@@ -320,7 +339,7 @@ func (s *CatalogService) Facets() (*FacetInfo, error) {
 // ClassifyStatus reports whether the vision model is available and how many
 // designs have been classified.
 func (s *CatalogService) ClassifyStatus() (*ClassifyStatusInfo, error) {
-	info := &ClassifyStatusInfo{Available: s.eng.HasClassifier()}
+	info := &ClassifyStatusInfo{Available: s.eng.HasClassifier(), Loaded: s.eng.ModelsLoaded()}
 	all, err := s.eng.List(context.Background(), catalog.Filter{Limit: 1_000_000})
 	if err != nil {
 		return nil, fmt.Errorf("catalog: classify status: %w", err)
@@ -375,7 +394,26 @@ func (s *CatalogService) ClassifyAll() error {
 		return nil
 	}
 
-	go s.runClassify(todo)
+	s.mu.Lock()
+	if s.classifyCancel != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("catalog: classification already running")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.classifyCancel = cancel
+	s.mu.Unlock()
+
+	go s.runClassify(ctx, todo)
+	return nil
+}
+
+// StopClassify cancels a running batch classification (no-op if none is running).
+func (s *CatalogService) StopClassify() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.classifyCancel != nil {
+		s.classifyCancel()
+	}
 	return nil
 }
 
@@ -385,8 +423,13 @@ type classifyResult struct {
 	err    error
 }
 
-func (s *CatalogService) runClassify(todo []catalog.Design) {
-	ctx := context.Background()
+func (s *CatalogService) runClassify(ctx context.Context, todo []catalog.Design) {
+	defer func() {
+		s.mu.Lock()
+		s.classifyCancel = nil
+		s.mu.Unlock()
+	}()
+
 	total := len(todo)
 
 	workers := s.eng.Concurrency()
@@ -410,11 +453,16 @@ func (s *CatalogService) runClassify(todo []catalog.Design) {
 			}
 		}()
 	}
+	// Feeder stops enqueuing as soon as the batch is cancelled (StopClassify).
 	go func() {
+		defer close(jobs)
 		for _, d := range todo {
-			jobs <- d
+			select {
+			case jobs <- d:
+			case <-ctx.Done():
+				return
+			}
 		}
-		close(jobs)
 	}()
 	go func() {
 		wg.Wait()
@@ -468,7 +516,15 @@ func (s *CatalogService) GenerateFolders(targetCount int) error {
 	if !s.eng.HasClassifier() {
 		return fmt.Errorf("catalog: folder generation unavailable (no vision model)")
 	}
+	s.mu.Lock()
+	s.foldersBusy = true
+	s.mu.Unlock()
 	go func() {
+		defer func() {
+			s.mu.Lock()
+			s.foldersBusy = false
+			s.mu.Unlock()
+		}()
 		folders, err := s.eng.GenerateFolders(context.Background(), targetCount)
 		if err != nil {
 			application.Get().Event.Emit("folders:error", FoldersErrorEvent{Error: err.Error()})
@@ -479,6 +535,41 @@ func (s *CatalogService) GenerateFolders(targetCount int) error {
 			fmt.Sprintf("%d pastas geradas pela IA.", len(folders)), s.appIcon)
 	}()
 	return nil
+}
+
+// EjectModels unloads the ML models to free memory. Refuses while classification
+// or folder generation is running (would unload mid-inference).
+func (s *CatalogService) EjectModels() error {
+	s.mu.Lock()
+	busy := s.classifyCancel != nil || s.foldersBusy
+	s.mu.Unlock()
+	if busy {
+		return fmt.Errorf("pare a classificação antes de ejetar o modelo")
+	}
+	return s.eng.EjectModels(context.Background())
+}
+
+// VisionModels returns the model picker options and the active one.
+func (s *CatalogService) VisionModels() (*VisionModelInfo, error) {
+	current := s.eng.CurrentVisionModel()
+	info := &VisionModelInfo{}
+	for _, p := range s.eng.VisionPresets() {
+		info.Models = append(info.Models, VisionModelOption{ID: p.ID, Label: p.Label, Description: p.Description, URL: p.URL})
+		if p.URL == current {
+			info.CurrentID = p.ID
+		}
+	}
+	return info, nil
+}
+
+// SetVisionModel selects a model by preset id (loads on next classification).
+func (s *CatalogService) SetVisionModel(id string) error {
+	for _, p := range s.eng.VisionPresets() {
+		if p.ID == id {
+			return s.eng.SetVisionModel(context.Background(), p.URL)
+		}
+	}
+	return fmt.Errorf("modelo desconhecido: %q", id)
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────

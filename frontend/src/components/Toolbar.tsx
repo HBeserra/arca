@@ -1,4 +1,4 @@
-import { FolderInput, FilePlus, Search, Moon, Sun, Monitor, Scissors, Loader2, Sparkles } from "lucide-react";
+import { FolderInput, FilePlus, Search, Moon, Sun, Monitor, Scissors, Loader2, Sparkles, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTheme } from "@/lib/theme";
@@ -17,6 +17,7 @@ interface Props {
   importTotal: number;
   classifyStatus: ClassifyStatus | null;
   onClassify: () => void;
+  onStopClassify: () => void;
   classifying: boolean;
   classifyDone: number;
   classifyTotal: number;
@@ -26,7 +27,7 @@ export function Toolbar(props: Props) {
   const {
     search, onSearch, onImportFolder, onImportFiles, count, total,
     importing, importDone, importTotal,
-    classifyStatus, onClassify, classifying, classifyDone, classifyTotal,
+    classifyStatus, onClassify, onStopClassify, classifying, classifyDone, classifyTotal,
   } = props;
 
   const semantic = (classifyStatus?.classified ?? 0) > 0;
@@ -85,12 +86,24 @@ export function Toolbar(props: Props) {
       </div>
 
       {importing && <ProgressRow label="Importando" done={importDone} total={importTotal} />}
-      {classifying && <ProgressRow label="Classificando" done={classifyDone} total={classifyTotal} />}
+      {classifying && (
+        <ProgressRow label="Classificando" done={classifyDone} total={classifyTotal} onStop={onStopClassify} />
+      )}
     </div>
   );
 }
 
-function ProgressRow({ label, done, total }: { label: string; done: number; total: number }) {
+function ProgressRow({
+  label,
+  done,
+  total,
+  onStop,
+}: {
+  label: string;
+  done: number;
+  total: number;
+  onStop?: () => void;
+}) {
   const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
   return (
     <div className="flex items-center gap-2 px-3 pb-2">
@@ -102,6 +115,11 @@ function ProgressRow({ label, done, total }: { label: string; done: number; tota
       <span className="text-xs tabular-nums text-muted-foreground">
         {total > 0 ? `${done}/${total}` : "preparando…"}
       </span>
+      {onStop && (
+        <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={onStop}>
+          <Square className="h-3 w-3" /> Parar
+        </Button>
+      )}
     </div>
   );
 }

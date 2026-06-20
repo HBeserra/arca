@@ -75,7 +75,11 @@ func main() {
 	}()
 
 	thumbs := thumbsDir()
-	mlEng := ml.New(logger)
+	var mlOpts []ml.Option
+	if vm, _ := store.GetSetting(context.Background(), "vision_model"); vm != "" {
+		mlOpts = append(mlOpts, ml.WithVisionModel(vm))
+	}
+	mlEng := ml.New(logger, mlOpts...)
 	eng := catalog.New(logger, reader, render.New(), store, thumbs, catalog.WithClassifier(mlEng))
 	catSvc := services.NewCatalogService(eng, appIcon)
 

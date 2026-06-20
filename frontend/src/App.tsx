@@ -21,6 +21,7 @@ import type {
   FolderInfo,
   FoldersCompletePayload,
   FoldersErrorPayload,
+  VisionModelInfo,
 } from "@/lib/types";
 import * as CatalogService from "../bindings/stitchvault/services/catalogservice";
 
@@ -42,6 +43,7 @@ export default function App() {
   const [classifying, setClassifying] = useState<ImportState>({ active: false, done: 0, total: 0 });
   const [folders, setFolders] = useState<FolderInfo[]>([]);
   const [generatingFolders, setGeneratingFolders] = useState(false);
+  const [visionInfo, setVisionInfo] = useState<VisionModelInfo | null>(null);
 
   const refreshDesigns = useCallback((f: ListFilter) => {
     CatalogService.ListDesigns(f as never).then((d) =>
@@ -66,12 +68,19 @@ export default function App() {
     CatalogService.ListFolders().then((f) => setFolders((f ?? []) as unknown as FolderInfo[]));
   }, []);
 
-  // Facets, classify status, folders once on mount (refreshed after import/classify).
+  const refreshVisionModels = useCallback(() => {
+    CatalogService.VisionModels().then((v) => {
+      if (v) setVisionInfo(v as unknown as VisionModelInfo);
+    });
+  }, []);
+
+  // Facets, classify status, folders, models once on mount.
   useEffect(() => {
     refreshFacets();
     refreshClassifyStatus();
     refreshFolders();
-  }, [refreshFacets, refreshClassifyStatus, refreshFolders]);
+    refreshVisionModels();
+  }, [refreshFacets, refreshClassifyStatus, refreshFolders, refreshVisionModels]);
 
   // Designs whenever the filter changes (and on mount).
   useEffect(() => {
@@ -169,6 +178,24 @@ export default function App() {
     CatalogService.GenerateFolders(8);
   }, []);
 
+  const handleStopClassify = useCallback(() => {
+    CatalogService.StopClassify();
+  }, []);
+
+  const handleSetVisionModel = useCallback(
+    (id: string) => {
+      CatalogService.SetVisionModel(id).then(() => {
+        refreshVisionModels();
+        refreshClassifyStatus();
+      });
+    },
+    [refreshVisionModels, refreshClassifyStatus]
+  );
+
+  const handleEjectModels = useCallback(() => {
+    CatalogService.EjectModels().then(() => refreshClassifyStatus());
+  }, [refreshClassifyStatus]);
+
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground">
@@ -184,6 +211,7 @@ export default function App() {
           importTotal={imp.total}
           classifyStatus={classifyStatus}
           onClassify={handleClassifyAll}
+          onStopClassify={handleStopClassify}
           classifying={classifying.active}
           classifyDone={classifying.done}
           classifyTotal={classifying.total}
@@ -199,6 +227,11 @@ export default function App() {
               foldersAvailable={(classifyStatus?.classified ?? 0) > 0}
               generatingFolders={generatingFolders}
               onGenerateFolders={handleGenerateFolders}
+              visionInfo={visionInfo}
+              onSetVisionModel={handleSetVisionModel}
+              modelsLoaded={classifyStatus?.loaded ?? false}
+              onEjectModels={handleEjectModels}
+              aiBusy={classifying.active || generatingFolders}
             />
           </div>
 

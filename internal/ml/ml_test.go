@@ -97,7 +97,7 @@ func TestClassifyLive(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 9*time.Minute)
 	defer cancel()
 
-	c, err := eng.Classify(ctx, png)
+	c, err := eng.Classify(ctx, png, "rose flower")
 	if err != nil {
 		t.Fatalf("Classify: %v", err)
 	}
