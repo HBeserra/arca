@@ -22,6 +22,11 @@ import type {
   FoldersCompletePayload,
   FoldersErrorPayload,
   VisionModelInfo,
+  CaptionLanguageInfo,
+  ExportProgressPayload,
+  ExportErrorPayload,
+  RestoreProgressPayload,
+  RestoreErrorPayload,
 } from "@/lib/types";
 import * as CatalogService from "../bindings/stitchvault/services/catalogservice";
 
@@ -50,8 +55,14 @@ export default function App() {
   const [folders, setFolders] = useState<FolderInfo[]>([]);
   const [generatingFolders, setGeneratingFolders] = useState(false);
   const [visionInfo, setVisionInfo] = useState<VisionModelInfo | null>(null);
+  const [captionInfo, setCaptionInfo] = useState<CaptionLanguageInfo | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [resetToken, setResetToken] = useState(0); // bump to scroll the gallery to top
+  const [catalogIO, setCatalogIO] = useState<{ kind: "export" | "restore" | null; done: number; total: number }>({
+    kind: null,
+    done: 0,
+    total: 0,
+  });
 
   // Latest-value refs so the infinite-scroll callback and event handlers don't
   // capture stale state.
@@ -129,13 +140,20 @@ export default function App() {
     });
   }, []);
 
+  const refreshCaptionLanguages = useCallback(() => {
+    CatalogService.CaptionLanguages().then((c) => {
+      if (c) setCaptionInfo(c as unknown as CaptionLanguageInfo);
+    });
+  }, []);
+
   // Facets, classify status, folders, models once on mount.
   useEffect(() => {
     refreshFacets();
     refreshClassifyStatus();
     refreshFolders();
     refreshVisionModels();
-  }, [refreshFacets, refreshClassifyStatus, refreshFolders, refreshVisionModels]);
+    refreshCaptionLanguages();
+  }, [refreshFacets, refreshClassifyStatus, refreshFolders, refreshVisionModels, refreshCaptionLanguages]);
 
   // Reload page 0 and scroll to top whenever the filter changes (and on mount).
   useEffect(() => {
@@ -194,6 +212,31 @@ export default function App() {
       setErrors((prev) => [...prev.slice(-19), `pastas: ${e.data.error}`]);
     });
 
+    const offExportProgress = Events.On("export:progress", (e: { data: ExportProgressPayload }) => {
+      setCatalogIO({ kind: "export", done: e.data.done, total: e.data.total });
+    });
+    const offExportComplete = Events.On("export:complete", () => {
+      setCatalogIO({ kind: null, done: 0, total: 0 });
+    });
+    const offExportError = Events.On("export:error", (e: { data: ExportErrorPayload }) => {
+      setCatalogIO({ kind: null, done: 0, total: 0 });
+      setErrors((prev) => [...prev.slice(-19), `exportar: ${e.data.error}`]);
+    });
+    const offRestoreProgress = Events.On("restore:progress", (e: { data: RestoreProgressPayload }) => {
+      setCatalogIO({ kind: "restore", done: e.data.done, total: e.data.total });
+    });
+    const offRestoreComplete = Events.On("restore:complete", () => {
+      setCatalogIO({ kind: null, done: 0, total: 0 });
+      reloadInPlaceRef.current();
+      refreshFacetsRef.current();
+      refreshFoldersRef.current();
+      refreshClassifyStatusRef.current();
+    });
+    const offRestoreError = Events.On("restore:error", (e: { data: RestoreErrorPayload }) => {
+      setCatalogIO({ kind: null, done: 0, total: 0 });
+      setErrors((prev) => [...prev.slice(-19), `importar: ${e.data.error}`]);
+    });
+
     return () => {
       offProgress();
       offError();
@@ -203,6 +246,12 @@ export default function App() {
       offCComplete();
       offFComplete();
       offFError();
+      offExportProgress();
+      offExportComplete();
+      offExportError();
+      offRestoreProgress();
+      offRestoreComplete();
+      offRestoreError();
     };
   }, []);
 
@@ -253,6 +302,23 @@ export default function App() {
     CatalogService.EjectModels().then(() => refreshClassifyStatus());
   }, [refreshClassifyStatus]);
 
+  const handleSetCaptionLanguage = useCallback(
+    (code: string) => {
+      CatalogService.SetCaptionLanguage(code).then(() => refreshCaptionLanguages());
+    },
+    [refreshCaptionLanguages]
+  );
+
+  const handleExportCatalog = useCallback(() => {
+    setErrors([]);
+    CatalogService.ExportCatalog();
+  }, []);
+
+  const handleImportCatalog = useCallback(() => {
+    setErrors([]);
+    CatalogService.ImportCatalog();
+  }, []);
+
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground">
@@ -286,9 +352,14 @@ export default function App() {
               onGenerateFolders={handleGenerateFolders}
               visionInfo={visionInfo}
               onSetVisionModel={handleSetVisionModel}
+              captionInfo={captionInfo}
+              onSetCaptionLanguage={handleSetCaptionLanguage}
               modelsLoaded={classifyStatus?.loaded ?? false}
               onEjectModels={handleEjectModels}
               aiBusy={classifying.active || generatingFolders}
+              onExportCatalog={handleExportCatalog}
+              onImportCatalog={handleImportCatalog}
+              catalogIO={catalogIO}
             />
           </div>
 
@@ -326,6 +397,13 @@ export default function App() {
           onClassified={(d) => {
             setSelected(d);
             setDesigns((prev) => prev.map((x) => (x.id === d.id ? d : x)));
+            refreshClassifyStatus();
+          }}
+          onDeleted={(id) => {
+            setSelected(null);
+            setDesigns((prev) => prev.filter((x) => x.id !== id));
+            setCount((c) => Math.max(0, c - 1));
+            refreshFacets();
             refreshClassifyStatus();
           }}
         />

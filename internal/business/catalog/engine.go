@@ -195,6 +195,21 @@ func (e *Engine) Get(ctx context.Context, id uuid.UUID) (Design, error) {
 	return e.store.GetDesign(ctx, id)
 }
 
+// Delete removes a design from the catalog and best-effort deletes its thumbnail.
+func (e *Engine) Delete(ctx context.Context, id uuid.UUID) error {
+	d, err := e.store.GetDesign(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := e.store.DeleteDesign(ctx, id); err != nil {
+		return err
+	}
+	if d.ThumbnailPath != "" {
+		_ = os.Remove(d.ThumbnailPath)
+	}
+	return nil
+}
+
 func (e *Engine) Facets(ctx context.Context) (Facets, error) {
 	return e.store.Facets(ctx)
 }
@@ -543,6 +558,30 @@ func (e *Engine) SetVisionModel(ctx context.Context, url string) error {
 		return err
 	}
 	e.cls.SetVisionModel(url)
+	return nil
+}
+
+// CaptionLanguagePresets returns the selectable description languages.
+func (e *Engine) CaptionLanguagePresets() []ml.CaptionLang { return ml.CaptionLanguagePresets() }
+
+// CaptionLanguage returns the active caption/tags language code.
+func (e *Engine) CaptionLanguage() string {
+	if e.cls == nil {
+		return ""
+	}
+	return e.cls.CaptionLanguage()
+}
+
+// SetCaptionLanguage switches the description language and persists the choice.
+// It takes effect on the next classification (no model reload).
+func (e *Engine) SetCaptionLanguage(ctx context.Context, code string) error {
+	if e.cls == nil {
+		return fmt.Errorf("catalog: language selection unavailable (no ML engine)")
+	}
+	if err := e.store.SetSetting(ctx, "caption_language", code); err != nil {
+		return err
+	}
+	e.cls.SetCaptionLanguage(code)
 	return nil
 }
 

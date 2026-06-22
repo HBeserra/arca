@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -308,6 +309,15 @@ func (s *CatalogService) CountDesigns(filter ListFilter) (int, error) {
 	return s.eng.Count(context.Background(), toFilter(filter))
 }
 
+// DeleteDesign removes one design (row + thumbnail) from the vault.
+func (s *CatalogService) DeleteDesign(id string) error {
+	did, err := uuid.Parse(id)
+	if err != nil {
+		return fmt.Errorf("catalog: invalid design id: %w", err)
+	}
+	return s.eng.Delete(context.Background(), did)
+}
+
 // GetDesign returns a single design by id.
 func (s *CatalogService) GetDesign(id string) (*DesignInfo, error) {
 	did, err := uuid.Parse(id)
@@ -590,6 +600,143 @@ func (s *CatalogService) SetVisionModel(id string) error {
 		}
 	}
 	return fmt.Errorf("modelo desconhecido: %q", id)
+}
+
+// CaptionLangOption is one selectable description language.
+type CaptionLangOption struct {
+	Code  string `json:"code"`
+	Label string `json:"label"`
+}
+
+// CaptionLanguageInfo is the description-language picker state.
+type CaptionLanguageInfo struct {
+	Current string              `json:"current"`
+	Options []CaptionLangOption `json:"options"`
+}
+
+// CaptionLanguages returns the description-language options and the active one.
+func (s *CatalogService) CaptionLanguages() (*CaptionLanguageInfo, error) {
+	info := &CaptionLanguageInfo{Current: s.eng.CaptionLanguage()}
+	for _, l := range s.eng.CaptionLanguagePresets() {
+		info.Options = append(info.Options, CaptionLangOption{Code: l.Code, Label: l.Label})
+	}
+	return info, nil
+}
+
+// SetCaptionLanguage sets the description language by code (e.g. "pt"); it takes
+// effect on the next classification.
+func (s *CatalogService) SetCaptionLanguage(code string) error {
+	return s.eng.SetCaptionLanguage(context.Background(), code)
+}
+
+// ─── catalog export / import (.svault portable bundle) ───────────────────────
+
+const svaultExt = ".svault"
+
+// ExportProgressEvent / ExportCompleteEvent / ExportErrorEvent drive the export UI.
+type ExportProgressEvent struct {
+	Done  int `json:"done"`
+	Total int `json:"total"`
+}
+type ExportCompleteEvent struct {
+	Path string `json:"path"`
+}
+type ExportErrorEvent struct {
+	Error string `json:"error"`
+}
+
+// RestoreProgressEvent / RestoreCompleteEvent / RestoreErrorEvent drive import.
+type RestoreProgressEvent struct {
+	Done  int `json:"done"`
+	Total int `json:"total"`
+}
+type RestoreCompleteEvent struct {
+	Total int `json:"total"`
+}
+type RestoreErrorEvent struct {
+	Error string `json:"error"`
+}
+
+// ExportCatalog prompts for a destination and writes the whole catalog as a
+// portable .svault bundle (index + thumbnails + original files) in the background.
+// Progress is emitted via export:* events.
+func (s *CatalogService) ExportCatalog() error {
+	path, err := application.Get().Dialog.SaveFile().
+		SetMessage("Exportar catálogo").
+		SetFilename("catalogo" + svaultExt).
+		AddFilter("StitchVault", "*"+svaultExt).
+		PromptForSingleSelection()
+	if err != nil || path == "" {
+		return err
+	}
+	if !strings.HasSuffix(strings.ToLower(path), svaultExt) {
+		path += svaultExt
+	}
+	go s.runExport(path)
+	return nil
+}
+
+func (s *CatalogService) runExport(path string) {
+	f, err := os.Create(path)
+	if err != nil {
+		application.Get().Event.Emit("export:error", ExportErrorEvent{Error: err.Error()})
+		return
+	}
+	err = s.eng.Export(context.Background(), f, func(done, total int) {
+		application.Get().Event.Emit("export:progress", ExportProgressEvent{Done: done, Total: total})
+	})
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(path) // don't leave a half-written bundle behind
+		application.Get().Event.Emit("export:error", ExportErrorEvent{Error: err.Error()})
+		return
+	}
+	application.Get().Event.Emit("export:complete", ExportCompleteEvent{Path: path})
+	_ = beeep.Notify("StitchVault — exportação concluída",
+		fmt.Sprintf("Catálogo exportado para %s.", filepath.Base(path)), s.appIcon)
+}
+
+// ImportCatalog prompts for a .svault bundle and merges it into the catalog in the
+// background (non-destructive upsert; no re-processing). Progress via restore:*.
+func (s *CatalogService) ImportCatalog() error {
+	path, err := application.Get().Dialog.OpenFile().
+		SetTitle("Importar catálogo").
+		CanChooseFiles(true).
+		AddFilter("StitchVault", "*"+svaultExt).
+		PromptForSingleSelection()
+	if err != nil || path == "" {
+		return err
+	}
+	go s.runRestore(path)
+	return nil
+}
+
+func (s *CatalogService) runRestore(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		application.Get().Event.Emit("restore:error", RestoreErrorEvent{Error: err.Error()})
+		return
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		application.Get().Event.Emit("restore:error", RestoreErrorEvent{Error: err.Error()})
+		return
+	}
+	var total int
+	err = s.eng.Import(context.Background(), f, fi.Size(), func(done, t int) {
+		total = t
+		application.Get().Event.Emit("restore:progress", RestoreProgressEvent{Done: done, Total: t})
+	})
+	if err != nil {
+		application.Get().Event.Emit("restore:error", RestoreErrorEvent{Error: err.Error()})
+		return
+	}
+	application.Get().Event.Emit("restore:complete", RestoreCompleteEvent{Total: total})
+	_ = beeep.Notify("StitchVault — importação concluída",
+		fmt.Sprintf("Catálogo importado de %s.", filepath.Base(path)), s.appIcon)
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────

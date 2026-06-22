@@ -15,11 +15,17 @@ function configure() {
         "classify:complete": $$createType0,
         "classify:error": $$createType1,
         "classify:progress": $$createType2,
-        "folders:complete": $$createType3,
-        "folders:error": $$createType4,
-        "import:complete": $$createType5,
-        "import:error": $$createType6,
-        "import:progress": $$createType7,
+        "export:complete": $$createType3,
+        "export:error": $$createType4,
+        "export:progress": $$createType5,
+        "folders:complete": $$createType6,
+        "folders:error": $$createType7,
+        "import:complete": $$createType8,
+        "import:error": $$createType9,
+        "import:progress": $$createType10,
+        "restore:complete": $$createType11,
+        "restore:error": $$createType12,
+        "restore:progress": $$createType13,
     }));
 }
 
@@ -27,10 +33,16 @@ function configure() {
 const $$createType0 = services$0.ClassifyCompleteEvent.createFrom;
 const $$createType1 = services$0.ClassifyErrorEvent.createFrom;
 const $$createType2 = services$0.ClassifyProgressEvent.createFrom;
-const $$createType3 = services$0.FoldersCompleteEvent.createFrom;
-const $$createType4 = services$0.FoldersErrorEvent.createFrom;
-const $$createType5 = services$0.ImportCompleteEvent.createFrom;
-const $$createType6 = services$0.ImportErrorEvent.createFrom;
-const $$createType7 = services$0.ImportProgressEvent.createFrom;
+const $$createType3 = services$0.ExportCompleteEvent.createFrom;
+const $$createType4 = services$0.ExportErrorEvent.createFrom;
+const $$createType5 = services$0.ExportProgressEvent.createFrom;
+const $$createType6 = services$0.FoldersCompleteEvent.createFrom;
+const $$createType7 = services$0.FoldersErrorEvent.createFrom;
+const $$createType8 = services$0.ImportCompleteEvent.createFrom;
+const $$createType9 = services$0.ImportErrorEvent.createFrom;
+const $$createType10 = services$0.ImportProgressEvent.createFrom;
+const $$createType11 = services$0.RestoreCompleteEvent.createFrom;
+const $$createType12 = services$0.RestoreErrorEvent.createFrom;
+const $$createType13 = services$0.RestoreProgressEvent.createFrom;
 
 configure();

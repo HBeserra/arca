@@ -125,6 +125,16 @@ export interface VisionModelInfo {
   models: VisionModelOption[];
 }
 
+export interface CaptionLangOption {
+  code: string;
+  label: string;
+}
+
+export interface CaptionLanguageInfo {
+  current: string;
+  options: CaptionLangOption[];
+}
+
 export interface ClassifyProgressPayload {
   done: number;
   total: number;
@@ -140,5 +150,31 @@ export interface ClassifyCompletePayload {
 
 export interface ClassifyErrorPayload {
   fileName: string;
+  error: string;
+}
+
+export interface ExportProgressPayload {
+  done: number;
+  total: number;
+}
+
+export interface ExportCompletePayload {
+  path: string;
+}
+
+export interface ExportErrorPayload {
+  error: string;
+}
+
+export interface RestoreProgressPayload {
+  done: number;
+  total: number;
+}
+
+export interface RestoreCompletePayload {
+  total: number;
+}
+
+export interface RestoreErrorPayload {
   error: string;
 }

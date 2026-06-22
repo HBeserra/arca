@@ -7,6 +7,86 @@
 import { Create as $Create } from "@wailsio/runtime";
 
 /**
+ * CaptionLangOption is one selectable description language.
+ */
+export class CaptionLangOption {
+    /**
+     * Creates a new CaptionLangOption instance.
+     * @param {Partial<CaptionLangOption>} [$$source = {}] - The source object to create the CaptionLangOption.
+     */
+    constructor($$source = {}) {
+        if (!("code" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["code"] = "";
+        }
+        if (!("label" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["label"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CaptionLangOption instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {CaptionLangOption}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new CaptionLangOption(/** @type {Partial<CaptionLangOption>} */($$parsedSource));
+    }
+}
+
+/**
+ * CaptionLanguageInfo is the description-language picker state.
+ */
+export class CaptionLanguageInfo {
+    /**
+     * Creates a new CaptionLanguageInfo instance.
+     * @param {Partial<CaptionLanguageInfo>} [$$source = {}] - The source object to create the CaptionLanguageInfo.
+     */
+    constructor($$source = {}) {
+        if (!("current" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["current"] = "";
+        }
+        if (!("options" in $$source)) {
+            /**
+             * @member
+             * @type {CaptionLangOption[]}
+             */
+            this["options"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CaptionLanguageInfo instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {CaptionLanguageInfo}
+     */
+    static createFrom($$source = {}) {
+        const $$createField1_0 = $$createType1;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("options" in $$parsedSource) {
+            $$parsedSource["options"] = $$createField1_0($$parsedSource["options"]);
+        }
+        return new CaptionLanguageInfo(/** @type {Partial<CaptionLanguageInfo>} */($$parsedSource));
+    }
+}
+
+/**
  * ClassifyCompleteEvent is emitted when the classification batch finishes.
  */
 export class ClassifyCompleteEvent {
@@ -392,8 +472,8 @@ export class DesignInfo {
      * @returns {DesignInfo}
      */
     static createFrom($$source = {}) {
-        const $$createField9_0 = $$createType1;
-        const $$createField15_0 = $$createType2;
+        const $$createField9_0 = $$createType3;
+        const $$createField15_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("palette" in $$parsedSource) {
             $$parsedSource["palette"] = $$createField9_0($$parsedSource["palette"]);
@@ -402,6 +482,100 @@ export class DesignInfo {
             $$parsedSource["tags"] = $$createField15_0($$parsedSource["tags"]);
         }
         return new DesignInfo(/** @type {Partial<DesignInfo>} */($$parsedSource));
+    }
+}
+
+export class ExportCompleteEvent {
+    /**
+     * Creates a new ExportCompleteEvent instance.
+     * @param {Partial<ExportCompleteEvent>} [$$source = {}] - The source object to create the ExportCompleteEvent.
+     */
+    constructor($$source = {}) {
+        if (!("path" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["path"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ExportCompleteEvent instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {ExportCompleteEvent}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ExportCompleteEvent(/** @type {Partial<ExportCompleteEvent>} */($$parsedSource));
+    }
+}
+
+export class ExportErrorEvent {
+    /**
+     * Creates a new ExportErrorEvent instance.
+     * @param {Partial<ExportErrorEvent>} [$$source = {}] - The source object to create the ExportErrorEvent.
+     */
+    constructor($$source = {}) {
+        if (!("error" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["error"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ExportErrorEvent instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {ExportErrorEvent}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ExportErrorEvent(/** @type {Partial<ExportErrorEvent>} */($$parsedSource));
+    }
+}
+
+/**
+ * ExportProgressEvent / ExportCompleteEvent / ExportErrorEvent drive the export UI.
+ */
+export class ExportProgressEvent {
+    /**
+     * Creates a new ExportProgressEvent instance.
+     * @param {Partial<ExportProgressEvent>} [$$source = {}] - The source object to create the ExportProgressEvent.
+     */
+    constructor($$source = {}) {
+        if (!("done" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["done"] = 0;
+        }
+        if (!("total" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["total"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ExportProgressEvent instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {ExportProgressEvent}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ExportProgressEvent(/** @type {Partial<ExportProgressEvent>} */($$parsedSource));
     }
 }
 
@@ -497,7 +671,7 @@ export class FacetInfo {
      * @returns {FacetInfo}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType4;
+        const $$createField1_0 = $$createType6;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("formats" in $$parsedSource) {
             $$parsedSource["formats"] = $$createField1_0($$parsedSource["formats"]);
@@ -858,12 +1032,106 @@ export class ListFilter {
      * @returns {ListFilter}
      */
     static createFrom($$source = {}) {
-        const $$createField0_0 = $$createType2;
+        const $$createField0_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("formats" in $$parsedSource) {
             $$parsedSource["formats"] = $$createField0_0($$parsedSource["formats"]);
         }
         return new ListFilter(/** @type {Partial<ListFilter>} */($$parsedSource));
+    }
+}
+
+export class RestoreCompleteEvent {
+    /**
+     * Creates a new RestoreCompleteEvent instance.
+     * @param {Partial<RestoreCompleteEvent>} [$$source = {}] - The source object to create the RestoreCompleteEvent.
+     */
+    constructor($$source = {}) {
+        if (!("total" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["total"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RestoreCompleteEvent instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {RestoreCompleteEvent}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new RestoreCompleteEvent(/** @type {Partial<RestoreCompleteEvent>} */($$parsedSource));
+    }
+}
+
+export class RestoreErrorEvent {
+    /**
+     * Creates a new RestoreErrorEvent instance.
+     * @param {Partial<RestoreErrorEvent>} [$$source = {}] - The source object to create the RestoreErrorEvent.
+     */
+    constructor($$source = {}) {
+        if (!("error" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["error"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RestoreErrorEvent instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {RestoreErrorEvent}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new RestoreErrorEvent(/** @type {Partial<RestoreErrorEvent>} */($$parsedSource));
+    }
+}
+
+/**
+ * RestoreProgressEvent / RestoreCompleteEvent / RestoreErrorEvent drive import.
+ */
+export class RestoreProgressEvent {
+    /**
+     * Creates a new RestoreProgressEvent instance.
+     * @param {Partial<RestoreProgressEvent>} [$$source = {}] - The source object to create the RestoreProgressEvent.
+     */
+    constructor($$source = {}) {
+        if (!("done" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["done"] = 0;
+        }
+        if (!("total" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["total"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RestoreProgressEvent instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {RestoreProgressEvent}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new RestoreProgressEvent(/** @type {Partial<RestoreProgressEvent>} */($$parsedSource));
     }
 }
 
@@ -900,7 +1168,7 @@ export class VisionModelInfo {
      * @returns {VisionModelInfo}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType6;
+        const $$createField1_0 = $$createType8;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("models" in $$parsedSource) {
             $$parsedSource["models"] = $$createField1_0($$parsedSource["models"]);
@@ -962,10 +1230,12 @@ export class VisionModelOption {
 }
 
 // Private type creation functions
-const $$createType0 = ColorInfo.createFrom;
+const $$createType0 = CaptionLangOption.createFrom;
 const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = $Create.Array($Create.Any);
-const $$createType3 = FacetCountInfo.createFrom;
-const $$createType4 = $Create.Array($$createType3);
-const $$createType5 = VisionModelOption.createFrom;
+const $$createType2 = ColorInfo.createFrom;
+const $$createType3 = $Create.Array($$createType2);
+const $$createType4 = $Create.Array($Create.Any);
+const $$createType5 = FacetCountInfo.createFrom;
 const $$createType6 = $Create.Array($$createType5);
+const $$createType7 = VisionModelOption.createFrom;
+const $$createType8 = $Create.Array($$createType7);

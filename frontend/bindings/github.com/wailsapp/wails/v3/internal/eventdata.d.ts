@@ -15,11 +15,17 @@ declare module "@wailsio/runtime" {
             "classify:complete": services$0.ClassifyCompleteEvent;
             "classify:error": services$0.ClassifyErrorEvent;
             "classify:progress": services$0.ClassifyProgressEvent;
+            "export:complete": services$0.ExportCompleteEvent;
+            "export:error": services$0.ExportErrorEvent;
+            "export:progress": services$0.ExportProgressEvent;
             "folders:complete": services$0.FoldersCompleteEvent;
             "folders:error": services$0.FoldersErrorEvent;
             "import:complete": services$0.ImportCompleteEvent;
             "import:error": services$0.ImportErrorEvent;
             "import:progress": services$0.ImportProgressEvent;
+            "restore:complete": services$0.RestoreCompleteEvent;
+            "restore:error": services$0.RestoreErrorEvent;
+            "restore:progress": services$0.RestoreProgressEvent;
         }
     }
 }

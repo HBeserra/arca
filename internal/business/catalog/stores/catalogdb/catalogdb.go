@@ -114,6 +114,14 @@ func (s *Store) InsertDesign(ctx context.Context, d catalog.Design) error {
 	return nil
 }
 
+// DeleteDesign removes a design row by id. The engine removes its thumbnail file.
+func (s *Store) DeleteDesign(ctx context.Context, id uuid.UUID) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM designs WHERE id = $1`, id.String()); err != nil {
+		return fmt.Errorf("delete design: %w", err)
+	}
+	return nil
+}
+
 const designColumns = `id, path, file_name, format, width_mm, height_mm,
 	stitch_count, color_changes, color_count, palette, thumbnail_path,
 	file_size_bytes, created_at, caption, tags, style, virtual_folder_id`

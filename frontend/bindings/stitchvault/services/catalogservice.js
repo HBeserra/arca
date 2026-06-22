@@ -16,6 +16,16 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as $models from "./models.js";
 
 /**
+ * CaptionLanguages returns the description-language options and the active one.
+ * @returns {$CancellablePromise<$models.CaptionLanguageInfo | null>}
+ */
+export function CaptionLanguages() {
+    return $Call.ByID(325200554).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType1($result);
+    }));
+}
+
+/**
  * ClassifyAll classifies, in the background, every design that has no caption yet.
  * Vision inference is GPU-bound and run one-at-a-time; progress is emitted per
  * design via classify:* events.
@@ -32,7 +42,7 @@ export function ClassifyAll() {
  */
 export function ClassifyDesign(id) {
     return $Call.ByID(2113077391, id).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType1($result);
+        return $$createType3($result);
     }));
 }
 
@@ -43,7 +53,7 @@ export function ClassifyDesign(id) {
  */
 export function ClassifyStatus() {
     return $Call.ByID(3213568687).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType3($result);
+        return $$createType5($result);
     }));
 }
 
@@ -57,6 +67,15 @@ export function CountDesigns(filter) {
 }
 
 /**
+ * DeleteDesign removes one design (row + thumbnail) from the vault.
+ * @param {string} id
+ * @returns {$CancellablePromise<void>}
+ */
+export function DeleteDesign(id) {
+    return $Call.ByID(246867390, id);
+}
+
+/**
  * EjectModels unloads the ML models to free memory. Refuses while classification
  * or folder generation is running (would unload mid-inference).
  * @returns {$CancellablePromise<void>}
@@ -66,12 +85,22 @@ export function EjectModels() {
 }
 
 /**
+ * ExportCatalog prompts for a destination and writes the whole catalog as a
+ * portable .svault bundle (index + thumbnails + original files) in the background.
+ * Progress is emitted via export:* events.
+ * @returns {$CancellablePromise<void>}
+ */
+export function ExportCatalog() {
+    return $Call.ByID(2357553564);
+}
+
+/**
  * Facets returns the catalog-wide facets for the filter sidebar.
  * @returns {$CancellablePromise<$models.FacetInfo | null>}
  */
 export function Facets() {
     return $Call.ByID(2572796851).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType5($result);
+        return $$createType7($result);
     }));
 }
 
@@ -92,8 +121,17 @@ export function GenerateFolders(targetCount) {
  */
 export function GetDesign(id) {
     return $Call.ByID(3126174655, id).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType1($result);
+        return $$createType3($result);
     }));
+}
+
+/**
+ * ImportCatalog prompts for a .svault bundle and merges it into the catalog in the
+ * background (non-destructive upsert; no re-processing). Progress via restore:*.
+ * @returns {$CancellablePromise<void>}
+ */
+export function ImportCatalog() {
+    return $Call.ByID(3533944145);
 }
 
 /**
@@ -117,7 +155,7 @@ export function ImportPaths(paths) {
  */
 export function ListDesigns(filter) {
     return $Call.ByID(87632774, filter).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType6($result);
+        return $$createType8($result);
     }));
 }
 
@@ -127,7 +165,7 @@ export function ListDesigns(filter) {
  */
 export function ListFolders() {
     return $Call.ByID(2026409948).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType8($result);
+        return $$createType10($result);
     }));
 }
 
@@ -137,7 +175,7 @@ export function ListFolders() {
  */
 export function PickFiles() {
     return $Call.ByID(936146497).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType9($result);
+        return $$createType11($result);
     }));
 }
 
@@ -147,6 +185,16 @@ export function PickFiles() {
  */
 export function PickFolder() {
     return $Call.ByID(1191992382);
+}
+
+/**
+ * SetCaptionLanguage sets the description language by code (e.g. "pt"); it takes
+ * effect on the next classification.
+ * @param {string} code
+ * @returns {$CancellablePromise<void>}
+ */
+export function SetCaptionLanguage(code) {
+    return $Call.ByID(298730175, code);
 }
 
 /**
@@ -172,20 +220,22 @@ export function StopClassify() {
  */
 export function VisionModels() {
     return $Call.ByID(2668989021).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType11($result);
+        return $$createType13($result);
     }));
 }
 
 // Private type creation functions
-const $$createType0 = $models.DesignInfo.createFrom;
+const $$createType0 = $models.CaptionLanguageInfo.createFrom;
 const $$createType1 = $Create.Nullable($$createType0);
-const $$createType2 = $models.ClassifyStatusInfo.createFrom;
+const $$createType2 = $models.DesignInfo.createFrom;
 const $$createType3 = $Create.Nullable($$createType2);
-const $$createType4 = $models.FacetInfo.createFrom;
+const $$createType4 = $models.ClassifyStatusInfo.createFrom;
 const $$createType5 = $Create.Nullable($$createType4);
-const $$createType6 = $Create.Array($$createType0);
-const $$createType7 = $models.FolderInfo.createFrom;
-const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = $Create.Array($Create.Any);
-const $$createType10 = $models.VisionModelInfo.createFrom;
-const $$createType11 = $Create.Nullable($$createType10);
+const $$createType6 = $models.FacetInfo.createFrom;
+const $$createType7 = $Create.Nullable($$createType6);
+const $$createType8 = $Create.Array($$createType2);
+const $$createType9 = $models.FolderInfo.createFrom;
+const $$createType10 = $Create.Array($$createType9);
+const $$createType11 = $Create.Array($Create.Any);
+const $$createType12 = $models.VisionModelInfo.createFrom;
+const $$createType13 = $Create.Nullable($$createType12);

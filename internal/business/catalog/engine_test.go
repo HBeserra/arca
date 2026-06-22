@@ -242,6 +242,8 @@ func (fakeClassifier) Complete(_ context.Context, _ string, _ map[string]any) (s
 func (fakeClassifier) Concurrency() int            { return 1 }
 func (fakeClassifier) VisionModel() string         { return "fake" }
 func (fakeClassifier) SetVisionModel(_ string)      {}
+func (fakeClassifier) CaptionLanguage() string      { return "pt" }
+func (fakeClassifier) SetCaptionLanguage(_ string)  {}
 func (fakeClassifier) Loaded() bool                { return true }
 func (fakeClassifier) Unload(_ context.Context) error { return nil }
 

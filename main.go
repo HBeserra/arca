@@ -40,6 +40,12 @@ func init() {
 	application.RegisterEvent[services.ClassifyErrorEvent]("classify:error")
 	application.RegisterEvent[services.FoldersCompleteEvent]("folders:complete")
 	application.RegisterEvent[services.FoldersErrorEvent]("folders:error")
+	application.RegisterEvent[services.ExportProgressEvent]("export:progress")
+	application.RegisterEvent[services.ExportCompleteEvent]("export:complete")
+	application.RegisterEvent[services.ExportErrorEvent]("export:error")
+	application.RegisterEvent[services.RestoreProgressEvent]("restore:progress")
+	application.RegisterEvent[services.RestoreCompleteEvent]("restore:complete")
+	application.RegisterEvent[services.RestoreErrorEvent]("restore:error")
 }
 
 func main() {
@@ -87,6 +93,10 @@ func main() {
 			_ = store.SetSetting(ctx, "vision_model", resolved)
 		}
 		mlOpts = append(mlOpts, ml.WithVisionModel(resolved))
+
+		if lang, _ := store.GetSetting(ctx, "caption_language"); lang != "" {
+			mlOpts = append(mlOpts, ml.WithCaptionLanguage(lang))
+		}
 	}
 	mlEng := ml.New(logger, mlOpts...)
 	eng := catalog.New(logger, reader, render.New(), store, thumbs, catalog.WithClassifier(mlEng))

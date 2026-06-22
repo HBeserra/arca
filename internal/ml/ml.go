@@ -76,7 +76,40 @@ const (
 	// 256). Override per run via $STITCHVAULT_CLASSIFY_PX. The stored thumbnail
 	// stays full-size for the UI.
 	defaultClassifyPx = 192
+
+	// defaultCaptionLang is the language the vision model writes the caption + tags
+	// in (a CaptionLanguagePresets code). Portuguese by default.
+	defaultCaptionLang = "pt"
 )
+
+// CaptionLang is a selectable description language (shown in the UI picker). The
+// instruction (written IN the target language, which small VLMs follow far more
+// reliably than an English "write in X") is internal.
+type CaptionLang struct {
+	Code        string `json:"code"`
+	Label       string `json:"label"`
+	instruction string
+}
+
+// CaptionLanguagePresets returns the selectable caption/tags languages.
+func CaptionLanguagePresets() []CaptionLang {
+	return []CaptionLang{
+		{Code: "pt", Label: "Português", instruction: `IMPORTANTE: escreva a "caption" e cada item de "tags" em PORTUGUÊS do Brasil. Nunca use inglês.`},
+		{Code: "en", Label: "English", instruction: `Write the "caption" and every "tags" entry in English.`},
+		{Code: "es", Label: "Español", instruction: `IMPORTANTE: escribe la "caption" y cada elemento de "tags" en ESPAÑOL. Nunca uses inglés.`},
+	}
+}
+
+// captionLangInstruction maps a language code to the in-language prompt directive,
+// falling back to the default (Portuguese) for an unknown code.
+func captionLangInstruction(code string) string {
+	for _, l := range CaptionLanguagePresets() {
+		if l.Code == code {
+			return l.instruction
+		}
+	}
+	return CaptionLanguagePresets()[0].instruction
+}
 
 // Classification is the structured result of classifying a design image. The lean
 // schema (classificationSchema) makes the model generate only caption, tags and
@@ -142,6 +175,7 @@ type Engine struct {
 	visionModel string // desired vision model source (URL)
 	concurrency int    // NSeqMax / worker-pool size for parallel inference
 	classifyPx  int    // downscale edge (px) for the classification image
+	captionLang string // caption/tags language code (e.g. "pt")
 
 	mu           sync.Mutex
 	sysReady     bool
@@ -242,6 +276,33 @@ func WithClassifyPx(n int) Option {
 	}
 }
 
+// WithCaptionLanguage sets the language code the caption/tags are written in.
+func WithCaptionLanguage(code string) Option {
+	return func(e *Engine) {
+		if code != "" {
+			e.captionLang = code
+		}
+	}
+}
+
+// CaptionLanguage reports the caption/tags language code.
+func (e *Engine) CaptionLanguage() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.captionLang
+}
+
+// SetCaptionLanguage changes the caption/tags language. It only affects the
+// prompt (no model reload), so it takes effect on the next classification.
+func (e *Engine) SetCaptionLanguage(code string) {
+	if code == "" {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.captionLang = code
+}
+
 // defaultConcurrency picks the parallel-inference width. Default is 1 (serial):
 // benchmarked on Apple Silicon, a single 3B vision inference already saturates the
 // GPU, so NSeqMax>1 only adds VRAM contention and is *slower*. Power users with a
@@ -276,6 +337,7 @@ func New(log *slog.Logger, opts ...Option) *Engine {
 		visionModel: DefaultVisionModel,
 		concurrency: defaultConcurrency(),
 		classifyPx:  classifyPxFromEnv(),
+		captionLang: defaultCaptionLang,
 	}
 	for _, o := range opts {
 		o(e)
@@ -489,6 +551,7 @@ func (e *Engine) Classify(ctx context.Context, png []byte, hint string) (Classif
 	if h := strings.TrimSpace(hint); h != "" {
 		prompt += "\n\nContext about this file (use as a clue, but classify what you actually see): " + h
 	}
+	prompt += "\n\n" + captionLangInstruction(e.CaptionLanguage())
 
 	d := model.D{
 		"messages":        model.ImageMessage(prompt, png, "png"),

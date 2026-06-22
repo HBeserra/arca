@@ -93,6 +93,7 @@ type DesignVector struct {
 // Store is the persistence contract for the catalog. Implemented by catalogdb.
 type Store interface {
 	InsertDesign(ctx context.Context, d Design) error
+	DeleteDesign(ctx context.Context, id uuid.UUID) error
 	ListDesigns(ctx context.Context, f Filter) ([]Design, error)
 	CountDesigns(ctx context.Context, f Filter) (int, error)
 	GetDesign(ctx context.Context, id uuid.UUID) (Design, error)
@@ -126,6 +127,8 @@ type Classifier interface {
 
 	VisionModel() string
 	SetVisionModel(url string)
+	CaptionLanguage() string
+	SetCaptionLanguage(code string)
 	Loaded() bool
 	Unload(ctx context.Context) error
 }

@@ -8,12 +8,17 @@ export {
 };
 
 export {
+    CaptionLangOption,
+    CaptionLanguageInfo,
     ClassifyCompleteEvent,
     ClassifyErrorEvent,
     ClassifyProgressEvent,
     ClassifyStatusInfo,
     ColorInfo,
     DesignInfo,
+    ExportCompleteEvent,
+    ExportErrorEvent,
+    ExportProgressEvent,
     FacetCountInfo,
     FacetInfo,
     FolderInfo,
@@ -23,6 +28,9 @@ export {
     ImportErrorEvent,
     ImportProgressEvent,
     ListFilter,
+    RestoreCompleteEvent,
+    RestoreErrorEvent,
+    RestoreProgressEvent,
     VisionModelInfo,
     VisionModelOption
 } from "./models.js";

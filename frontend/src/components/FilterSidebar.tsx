@@ -1,10 +1,10 @@
-import { Check, FolderTree, Folder, Sparkles, Loader2, X, Cpu, MemoryStick, CopyCheck } from "lucide-react";
+import { Check, FolderTree, Folder, Sparkles, Loader2, X, Cpu, MemoryStick, CopyCheck, Languages, Archive, Download, Upload } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import type { FacetInfo, ListFilter, FolderInfo, VisionModelInfo } from "@/lib/types";
+import type { FacetInfo, ListFilter, FolderInfo, VisionModelInfo, CaptionLanguageInfo } from "@/lib/types";
 import { emptyFilter } from "@/lib/types";
 
 interface Props {
@@ -17,9 +17,14 @@ interface Props {
   onGenerateFolders: () => void;
   visionInfo: VisionModelInfo | null;
   onSetVisionModel: (id: string) => void;
+  captionInfo: CaptionLanguageInfo | null;
+  onSetCaptionLanguage: (code: string) => void;
   modelsLoaded: boolean;
   onEjectModels: () => void;
   aiBusy: boolean;
+  onExportCatalog: () => void;
+  onImportCatalog: () => void;
+  catalogIO: { kind: "export" | "restore" | null; done: number; total: number };
 }
 
 export function FilterSidebar({
@@ -32,9 +37,14 @@ export function FilterSidebar({
   onGenerateFolders,
   visionInfo,
   onSetVisionModel,
+  captionInfo,
+  onSetCaptionLanguage,
   modelsLoaded,
   onEjectModels,
   aiBusy,
+  onExportCatalog,
+  onImportCatalog,
+  catalogIO,
 }: Props) {
   const set = (patch: Partial<ListFilter>) => onChange({ ...filter, ...patch });
 
@@ -240,6 +250,27 @@ export function FilterSidebar({
             ) : (
               <p className="text-xs text-muted-foreground/70">Modelo de visão indisponível.</p>
             )}
+
+            {captionInfo && captionInfo.options.length > 0 && (
+              <div className="space-y-1 pt-1">
+                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <Languages className="h-3 w-3" /> Idioma da descrição
+                </label>
+                <Select value={captionInfo.current || undefined} onValueChange={onSetCaptionLanguage} disabled={aiBusy}>
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue placeholder="Idioma" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {captionInfo.options.map((o) => (
+                      <SelectItem key={o.code} value={o.code} className="text-sm">
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             {modelsLoaded && (
               <Button
                 variant="ghost"
@@ -252,6 +283,32 @@ export function FilterSidebar({
                 <MemoryStick className="h-3 w-3" /> Liberar memória
               </Button>
             )}
+          </section>
+
+          {/* Catalog export / import (.svault portable bundle) */}
+          <section className="space-y-1.5 pt-2 border-t">
+            <h3 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <Archive className="h-3.5 w-3.5" /> Catálogo
+            </h3>
+            {catalogIO.kind ? (
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                {catalogIO.kind === "export" ? "Exportando" : "Importando"}…{" "}
+                {catalogIO.total > 0 ? `${catalogIO.done}/${catalogIO.total}` : ""}
+              </p>
+            ) : (
+              <div className="flex flex-col gap-0.5">
+                <Button variant="ghost" size="sm" className="h-7 justify-start px-2 text-xs" onClick={onExportCatalog}>
+                  <Download className="h-3.5 w-3.5" /> Exportar catálogo
+                </Button>
+                <Button variant="ghost" size="sm" className="h-7 justify-start px-2 text-xs" onClick={onImportCatalog}>
+                  <Upload className="h-3.5 w-3.5" /> Importar catálogo
+                </Button>
+              </div>
+            )}
+            <p className="text-[11px] leading-relaxed text-muted-foreground/70">
+              Pacote portátil (.svault) com índice, miniaturas e arquivos — abra em outro computador sem reprocessar.
+            </p>
           </section>
         </div>
       </ScrollArea>

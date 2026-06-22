@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
-import { Sparkles, Loader2 } from "lucide-react";
+import { Sparkles, Loader2, Trash2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,10 +13,16 @@ interface Props {
   classifyAvailable: boolean;
   onClose: () => void;
   onClassified: (d: DesignInfo) => void;
+  onDeleted: (id: string) => void;
 }
 
-export function DesignDetailDialog({ design, classifyAvailable, onClose, onClassified }: Props) {
+export function DesignDetailDialog({ design, classifyAvailable, onClose, onClassified, onDeleted }: Props) {
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  // Reset the delete confirmation whenever a different design is opened.
+  useEffect(() => setConfirmDelete(false), [design?.id]);
 
   const classify = async () => {
     if (!design) return;
@@ -26,6 +32,18 @@ export function DesignDetailDialog({ design, classifyAvailable, onClose, onClass
       if (updated) onClassified(updated as unknown as DesignInfo);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const doDelete = async () => {
+    if (!design) return;
+    setDeleting(true);
+    try {
+      await CatalogService.DeleteDesign(design.id);
+      onDeleted(design.id);
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(false);
     }
   };
 
@@ -107,6 +125,30 @@ export function DesignDetailDialog({ design, classifyAvailable, onClose, onClass
                   </div>
                 </div>
               </ScrollArea>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t pt-3">
+              {confirmDelete ? (
+                <>
+                  <span className="mr-auto text-xs text-muted-foreground">Remover este bordado do vault?</span>
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setConfirmDelete(false)} disabled={deleting}>
+                    Cancelar
+                  </Button>
+                  <Button variant="destructive" size="sm" className="h-7 text-xs" onClick={doDelete} disabled={deleting}>
+                    {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    Remover
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs text-destructive hover:text-destructive"
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Remover do vault
+                </Button>
+              )}
             </div>
           </>
         )}
