@@ -76,6 +76,15 @@ export function DeleteDesign(id) {
 }
 
 /**
+ * DeleteDesigns removes several designs (rows + thumbnails) in one call.
+ * @param {string[]} ids
+ * @returns {$CancellablePromise<void>}
+ */
+export function DeleteDesigns(ids) {
+    return $Call.ByID(4142645687, ids);
+}
+
+/**
  * EjectModels unloads the ML models to free memory. Refuses while classification
  * or folder generation is running (would unload mid-inference).
  * @returns {$CancellablePromise<void>}

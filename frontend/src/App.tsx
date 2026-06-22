@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Events } from "@wailsio/runtime";
-import { X } from "lucide-react";
+import { X, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toolbar } from "@/components/Toolbar";
 import { FilterSidebar } from "@/components/FilterSidebar";
@@ -63,6 +64,8 @@ export default function App() {
     done: 0,
     total: 0,
   });
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
 
   // Latest-value refs so the infinite-scroll callback and event handlers don't
   // capture stale state.
@@ -159,6 +162,8 @@ export default function App() {
   useEffect(() => {
     loadFirst(filter);
     setResetToken((t) => t + 1);
+    setSelectedIds(new Set());
+    setConfirmBulkDelete(false);
   }, [filter, loadFirst]);
 
   // Keep latest refs for the one-time event subscription + infinite scroll.
@@ -319,6 +324,38 @@ export default function App() {
     CatalogService.ImportCatalog();
   }, []);
 
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+    setConfirmBulkDelete(false);
+  }, []);
+
+  const selectAllLoaded = useCallback(() => {
+    setSelectedIds(new Set(designs.map((d) => d.id)));
+  }, [designs]);
+
+  const handleBulkDelete = useCallback(() => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    const removed = new Set(ids);
+    CatalogService.DeleteDesigns(ids as never).then(() => {
+      setDesigns((prev) => prev.filter((d) => !removed.has(d.id)));
+      setCount((c) => Math.max(0, c - ids.length));
+      setSelectedIds(new Set());
+      setConfirmBulkDelete(false);
+      refreshFacets();
+      refreshClassifyStatus();
+    });
+  }, [selectedIds, refreshFacets, refreshClassifyStatus]);
+
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground">
@@ -339,6 +376,35 @@ export default function App() {
           classifyDone={classifying.done}
           classifyTotal={classifying.total}
         />
+
+        {selectedIds.size > 0 && (
+          <div className="flex items-center gap-3 border-b bg-accent/40 px-3 py-1.5 text-sm">
+            <span className="font-medium">{selectedIds.size} selecionado(s)</span>
+            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={selectAllLoaded}>
+              Selecionar carregados
+            </button>
+            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={clearSelection}>
+              Limpar
+            </button>
+            <div className="ml-auto flex items-center gap-2">
+              {confirmBulkDelete ? (
+                <>
+                  <span className="text-xs text-muted-foreground">Remover {selectedIds.size}?</span>
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setConfirmBulkDelete(false)}>
+                    Cancelar
+                  </Button>
+                  <Button variant="destructive" size="sm" className="h-7 text-xs" onClick={handleBulkDelete}>
+                    <Trash2 className="h-3.5 w-3.5" /> Remover
+                  </Button>
+                </>
+              ) : (
+                <Button variant="destructive" size="sm" className="h-7 text-xs" onClick={() => setConfirmBulkDelete(true)}>
+                  <Trash2 className="h-3.5 w-3.5" /> Remover selecionados
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-1 overflow-hidden min-h-0">
           <div className="w-64 flex-shrink-0 border-r flex flex-col overflow-hidden">
@@ -372,6 +438,8 @@ export default function App() {
               hasMore={hasMore}
               loadingMore={loadingMore}
               resetToken={resetToken}
+              selectedIds={selectedIds}
+              onToggleSelect={toggleSelect}
             />
           </div>
         </div>

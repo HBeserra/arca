@@ -210,6 +210,21 @@ func (e *Engine) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// DeleteMany removes many designs (rows + thumbnail files) in one batch. The
+// thumbnail path is deterministic (<thumbDir>/<id>.png), so no per-id lookup.
+func (e *Engine) DeleteMany(ctx context.Context, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := e.store.DeleteDesigns(ctx, ids); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		_ = os.Remove(filepath.Join(e.thumbDir, id.String()+".png"))
+	}
+	return nil
+}
+
 func (e *Engine) Facets(ctx context.Context) (Facets, error) {
 	return e.store.Facets(ctx)
 }

@@ -122,6 +122,25 @@ func (s *Store) DeleteDesign(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// DeleteDesigns removes many design rows in one statement. The engine removes the
+// thumbnail files.
+func (s *Store) DeleteDesigns(ctx context.Context, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	ph := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		ph[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id.String()
+	}
+	q := `DELETE FROM designs WHERE id IN (` + strings.Join(ph, ",") + `)`
+	if _, err := s.db.ExecContext(ctx, q, args...); err != nil {
+		return fmt.Errorf("delete designs: %w", err)
+	}
+	return nil
+}
+
 const designColumns = `id, path, file_name, format, width_mm, height_mm,
 	stitch_count, color_changes, color_count, palette, thumbnail_path,
 	file_size_bytes, created_at, caption, tags, style, virtual_folder_id`

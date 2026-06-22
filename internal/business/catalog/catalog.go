@@ -94,6 +94,7 @@ type DesignVector struct {
 type Store interface {
 	InsertDesign(ctx context.Context, d Design) error
 	DeleteDesign(ctx context.Context, id uuid.UUID) error
+	DeleteDesigns(ctx context.Context, ids []uuid.UUID) error
 	ListDesigns(ctx context.Context, f Filter) ([]Design, error)
 	CountDesigns(ctx context.Context, f Filter) (int, error)
 	GetDesign(ctx context.Context, id uuid.UUID) (Design, error)

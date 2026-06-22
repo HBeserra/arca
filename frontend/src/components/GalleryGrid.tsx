@@ -1,7 +1,8 @@
 import { useRef, useState, useEffect, useLayoutEffect } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ImageOff, FolderInput, Loader2 } from "lucide-react";
+import { ImageOff, FolderInput, Loader2, Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import type { DesignInfo } from "@/lib/types";
 
 interface Props {
@@ -13,6 +14,8 @@ interface Props {
   loadingMore: boolean;
   /** Bumped by the parent to scroll back to the top (e.g. on filter change). */
   resetToken: number;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
 }
 
 // Layout constants — mirror the CSS so windowing math matches what renders.
@@ -23,7 +26,8 @@ const MIN_COL = 180; // minimum card width (px) — matches the old auto-fill gr
 // GalleryGrid renders the catalog as a virtualized grid: only the rows currently
 // in (or near) the viewport exist in the DOM, so 10k+ designs stay smooth. Scrolling
 // near the end calls onLoadMore for infinite paging.
-export function GalleryGrid({ designs, hasAny, onSelect, onLoadMore, hasMore, loadingMore, resetToken }: Props) {
+export function GalleryGrid({ designs, hasAny, onSelect, onLoadMore, hasMore, loadingMore, resetToken, selectedIds, onToggleSelect }: Props) {
+  const selectionActive = selectedIds.size > 0;
   const parentRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
 
@@ -120,7 +124,14 @@ export function GalleryGrid({ designs, hasAny, onSelect, onLoadMore, hasMore, lo
                   }}
                 >
                   {rowItems.map((d) => (
-                    <DesignCard key={d.id} design={d} onClick={() => onSelect(d)} />
+                    <DesignCard
+                      key={d.id}
+                      design={d}
+                      onClick={() => onSelect(d)}
+                      selected={selectedIds.has(d.id)}
+                      selectionActive={selectionActive}
+                      onToggleSelect={() => onToggleSelect(d.id)}
+                    />
                   ))}
                 </div>
               );
@@ -137,40 +148,73 @@ export function GalleryGrid({ designs, hasAny, onSelect, onLoadMore, hasMore, lo
   );
 }
 
-function DesignCard({ design, onClick }: { design: DesignInfo; onClick: () => void }) {
+function DesignCard({
+  design,
+  onClick,
+  selected,
+  selectionActive,
+  onToggleSelect,
+}: {
+  design: DesignInfo;
+  onClick: () => void;
+  selected: boolean;
+  selectionActive: boolean;
+  onToggleSelect: () => void;
+}) {
   return (
-    <button
-      onClick={onClick}
-      className="group flex flex-col overflow-hidden rounded-lg border bg-card text-left transition-colors hover:border-primary/50 hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+    <div
+      className={cn(
+        "group relative flex flex-col overflow-hidden rounded-lg border bg-card transition-colors",
+        selected ? "border-primary ring-1 ring-primary" : "hover:border-primary/50 hover:bg-accent/30"
+      )}
     >
-      <div className="aspect-square w-full overflow-hidden bg-[#FAFAF8]">
-        <img
-          src={design.thumbnailURL}
-          alt={design.fileName}
-          loading="lazy"
-          className="h-full w-full object-contain transition-transform group-hover:scale-105"
-        />
-      </div>
-      <div className="flex flex-col gap-1.5 p-2">
-        <p className="truncate text-xs font-medium" title={design.fileName}>
-          {design.fileName}
-        </p>
-        <div className="flex items-center justify-between gap-1">
-          <Badge variant="secondary" className="font-mono text-[10px] uppercase">
-            {design.format.replace(".", "")}
-          </Badge>
-          <span className="text-[10px] tabular-nums text-muted-foreground">
-            {Math.round(design.widthMM)}×{Math.round(design.heightMM)} mm
-          </span>
+      <button
+        type="button"
+        aria-label={selected ? "Desmarcar" : "Selecionar"}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleSelect();
+        }}
+        className={cn(
+          "absolute left-1.5 top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded border bg-background/90 shadow-sm transition-opacity",
+          selected
+            ? "border-primary bg-primary text-primary-foreground opacity-100"
+            : cn("border-muted-foreground/40", selectionActive ? "opacity-100" : "opacity-0 group-hover:opacity-100")
+        )}
+      >
+        {selected && <Check className="h-3.5 w-3.5" />}
+      </button>
+
+      <button onClick={onClick} className="flex flex-col text-left focus-visible:outline-none">
+        <div className="aspect-square w-full overflow-hidden bg-[#FAFAF8]">
+          <img
+            src={design.thumbnailURL}
+            alt={design.fileName}
+            loading="lazy"
+            className="h-full w-full object-contain transition-transform group-hover:scale-105"
+          />
         </div>
-        <div className="flex items-center justify-between gap-1">
-          <PaletteDots palette={design.palette} />
-          <span className="text-[10px] tabular-nums text-muted-foreground">
-            {formatCount(design.stitchCount)} pts
-          </span>
+        <div className="flex flex-col gap-1.5 p-2">
+          <p className="truncate text-xs font-medium" title={design.fileName}>
+            {design.fileName}
+          </p>
+          <div className="flex items-center justify-between gap-1">
+            <Badge variant="secondary" className="font-mono text-[10px] uppercase">
+              {design.format.replace(".", "")}
+            </Badge>
+            <span className="text-[10px] tabular-nums text-muted-foreground">
+              {Math.round(design.widthMM)}×{Math.round(design.heightMM)} mm
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-1">
+            <PaletteDots palette={design.palette} />
+            <span className="text-[10px] tabular-nums text-muted-foreground">
+              {formatCount(design.stitchCount)} pts
+            </span>
+          </div>
         </div>
-      </div>
-    </button>
+      </button>
+    </div>
   );
 }
 

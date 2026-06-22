@@ -318,6 +318,17 @@ func (s *CatalogService) DeleteDesign(id string) error {
 	return s.eng.Delete(context.Background(), did)
 }
 
+// DeleteDesigns removes several designs (rows + thumbnails) in one call.
+func (s *CatalogService) DeleteDesigns(ids []string) error {
+	uids := make([]uuid.UUID, 0, len(ids))
+	for _, id := range ids {
+		if did, err := uuid.Parse(id); err == nil {
+			uids = append(uids, did)
+		}
+	}
+	return s.eng.DeleteMany(context.Background(), uids)
+}
+
 // GetDesign returns a single design by id.
 func (s *CatalogService) GetDesign(id string) (*DesignInfo, error) {
 	did, err := uuid.Parse(id)
