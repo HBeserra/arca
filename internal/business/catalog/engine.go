@@ -389,7 +389,11 @@ func (e *Engine) GenerateFolders(ctx context.Context, targetCount int) ([]Virtua
 		return nil, err
 	}
 
-	out, err := e.cls.Complete(ctx, buildTaxonomyPrompt(all, targetCount), folderSchema())
+	lang := ""
+	if e.cls != nil {
+		lang = e.cls.CaptionLanguage()
+	}
+	out, err := e.cls.Complete(ctx, buildTaxonomyPrompt(all, targetCount, lang), folderSchema())
 	if err != nil {
 		return nil, err
 	}
@@ -469,7 +473,21 @@ func folderSchema() map[string]any {
 	}
 }
 
-func buildTaxonomyPrompt(designs []Design, targetCount int) string {
+// folderLangDirective returns an in-language instruction so folder names match the
+// configured description language — small LLMs follow a native-language directive
+// far better than an English "write in X".
+func folderLangDirective(lang string) string {
+	switch lang {
+	case "en":
+		return "Write all folder names and descriptions in English."
+	case "es":
+		return `IMPORTANTE: escribe TODOS los nombres y descripciones de las carpetas en ESPAÑOL.`
+	default: // pt
+		return `IMPORTANTE: escreva TODOS os nomes e descrições das pastas em PORTUGUÊS do Brasil.`
+	}
+}
+
+func buildTaxonomyPrompt(designs []Design, targetCount int, lang string) string {
 	tagFreq := map[string]int{}
 	var captions []string
 	for _, d := range designs {
@@ -514,8 +532,12 @@ func buildTaxonomyPrompt(designs []Design, targetCount int) string {
 		}
 		b.WriteString("\n")
 	}
-	fmt.Fprintf(&b, "Propose about %d concise, mutually distinct folder categories that organize the whole library. ", targetCount)
-	b.WriteString("Each folder needs a short Title-Case name and a one-sentence description. Prefer subject/theme categories (animals, flowers, holidays, monograms, sports, vehicles, geometric, food, fantasy, etc.).")
+	fmt.Fprintf(&b, "Propose about %d concise, mutually distinct folder categories that organize the whole library.\n", targetCount)
+	b.WriteString(`Each folder name MUST be just 1-2 words naming the theme — do NOT include the words "Machine", "Embroidery", "Design", "Designs", "Pattern" or "Motif". Give each folder a one-sentence description.`)
+	if d := folderLangDirective(lang); d != "" {
+		b.WriteString("\n\n")
+		b.WriteString(d)
+	}
 	return b.String()
 }
 
