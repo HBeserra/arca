@@ -70,16 +70,19 @@ const (
 
 	EmbedDim = 768
 
-	// classifyImageSize is the max edge (px) the thumbnail is downscaled to before
-	// classification. Vision-token count scales with image size and dominates
-	// inference time, so this is the single biggest speed lever: 256px is ~4.5x
-	// faster than 512 with no meaningful quality loss for embroidery line art. The
-	// stored thumbnail stays full-size for the UI.
-	classifyImageSize = 256
+	// defaultClassifyPx is the max edge (px) the thumbnail is downscaled to before
+	// classification. Vision-token count scales with image area and drives the
+	// prefill cost, so this is a primary speed lever (512px is ~4.5x slower than
+	// 256). Override per run via $STITCHVAULT_CLASSIFY_PX. The stored thumbnail
+	// stays full-size for the UI.
+	defaultClassifyPx = 192
 )
 
-// Classification is the structured result of classifying a design image. The JSON
-// schema below constrains the vision model to exactly these fields.
+// Classification is the structured result of classifying a design image. The lean
+// schema (classificationSchema) makes the model generate only caption, tags and
+// rotate — short output is the main classify speed lever (classification is
+// decode-bound). Elements/Style/Theme/Mood remain for backward compatibility but
+// are no longer populated (always empty); embedText/mergeTags degrade gracefully.
 type Classification struct {
 	Caption  string   `json:"caption"`
 	Elements []string `json:"elements"`
@@ -138,12 +141,15 @@ type Engine struct {
 	embedModel  string
 	visionModel string // desired vision model source (URL)
 	concurrency int    // NSeqMax / worker-pool size for parallel inference
+	classifyPx  int    // downscale edge (px) for the classification image
 
 	mu           sync.Mutex
 	sysReady     bool
 	krnEmbed     *kronk.Kronk
 	krnVision    *kronk.Kronk
 	loadedVision string // URL currently loaded in krnVision (for hot-swap)
+
+	embedMu sync.Mutex // serializes Embeddings (embed model is single-sequence)
 }
 
 // VisionModel reports the desired vision model source.
@@ -227,6 +233,15 @@ func WithConcurrency(n int) Option {
 // Concurrency reports the configured parallel-inference width.
 func (e *Engine) Concurrency() int { return e.concurrency }
 
+// WithClassifyPx overrides the classification image edge (px).
+func WithClassifyPx(n int) Option {
+	return func(e *Engine) {
+		if n > 0 {
+			e.classifyPx = n
+		}
+	}
+}
+
 // defaultConcurrency picks the parallel-inference width. Default is 1 (serial):
 // benchmarked on Apple Silicon, a single 3B vision inference already saturates the
 // GPU, so NSeqMax>1 only adds VRAM contention and is *slower*. Power users with a
@@ -240,6 +255,17 @@ func defaultConcurrency() int {
 	return 1
 }
 
+// classifyPxFromEnv picks the classification image edge, overridable via
+// $STITCHVAULT_CLASSIFY_PX (clamped to a sane 64..1024 range).
+func classifyPxFromEnv() int {
+	if v := os.Getenv("STITCHVAULT_CLASSIFY_PX"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 64 && n <= 1024 {
+			return n
+		}
+	}
+	return defaultClassifyPx
+}
+
 // New creates the ML engine (no models loaded yet).
 func New(log *slog.Logger, opts ...Option) *Engine {
 	ensureProcessorEnv()
@@ -249,6 +275,7 @@ func New(log *slog.Logger, opts ...Option) *Engine {
 		embedModel:  DefaultEmbedModel,
 		visionModel: DefaultVisionModel,
 		concurrency: defaultConcurrency(),
+		classifyPx:  classifyPxFromEnv(),
 	}
 	for _, o := range opts {
 		o(e)
@@ -347,14 +374,14 @@ func (e *Engine) EnsureEmbed(ctx context.Context) error {
 		return err
 	}
 	krn, err := e.loadKronk(ctx, e.embedModel, func(mp models.Path) ([]model.Option, error) {
-		opts := []model.Option{
+		// Always single-sequence: embeddinggemma's pooling graph asserts
+		// (ggml_can_mul_mat) and aborts the process under NSeqMax>1. Embedding is
+		// cheap, so the concurrency knob (vision worker pool) doesn't apply here;
+		// Embed() serializes concurrent callers via embedMu.
+		return []model.Option{
 			model.WithModelFiles(mp.ModelFiles),
 			model.WithAutoTune(true),
-		}
-		if e.concurrency > 1 {
-			opts = append(opts, model.WithNSeqMax(e.concurrency))
-		}
-		return opts, nil
+		}, nil
 	})
 	if err != nil {
 		return err
@@ -388,16 +415,25 @@ func (e *Engine) EnsureVision(ctx context.Context) error {
 			model.WithModelFiles(mp.ModelFiles),
 			model.WithProjFile(mp.ProjFile),
 			model.WithAutoTune(true),
+			// Vision tuning (Kronk manual §3.11): process the image's token batch in
+			// a single prefill pass. A low n_ubatch forces multiple passes per image
+			// and "significantly slows inference"; match n_batch to it. Safe on Apple
+			// Silicon's unified memory.
+			model.WithNBatch(2048),
+			model.WithNUBatch(2048),
 		}
+		// Classification needs little context (~image + short prompt + short JSON),
+		// so a small window keeps the KV cache and graph reserve light. Parallel
+		// slots (opt-in) need their own KV partitions and a bigger shared context.
+		ctxWindow := 4096
 		if e.concurrency > 1 {
-			// Multiple sequence slots + non-incremental cache so several
-			// classifications can run in parallel against this one loaded model.
+			ctxWindow = 8 * 1024
 			opts = append(opts,
 				model.WithNSeqMax(e.concurrency),
 				model.WithIncrementalCache(false),
-				model.WithContextWindow(8*1024),
 			)
 		}
+		opts = append(opts, model.WithContextWindow(ctxWindow))
 		return opts, nil
 	})
 	if err != nil {
@@ -416,7 +452,11 @@ func (e *Engine) Embed(ctx context.Context, text string) ([]float32, error) {
 	}
 	ictx, cancel := withDefaultTimeout(ctx, 90*time.Second)
 	defer cancel()
+	// The embed model has a single sequence slot; serialize concurrent callers
+	// (the classify worker pool) so they don't contend on it.
+	e.embedMu.Lock()
 	resp, err := e.krnEmbed.Embeddings(ictx, model.D{"input": text, "truncate": true})
+	e.embedMu.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("ml: embed: %w", err)
 	}
@@ -427,11 +467,11 @@ func (e *Engine) Embed(ctx context.Context, text string) ([]float32, error) {
 }
 
 const classifyPrompt = `Look at this machine-embroidery design and describe ONLY what you actually
-see in the image. Do not repeat, quote, or echo these instructions. Write the caption as one short
-sentence; list the concrete things you see as elements; give the visual style, the overall theme,
-and the mood; and provide 3 to 8 short lowercase search tags. For "rotate", output the clockwise
-degrees needed to make the design read upright — "0", "90", "180" or "270" — using "0" unless a
-clearly recognizable subject (a face, animal, or letter) appears sideways or upside down.`
+see. Do not repeat or echo these instructions, and do NOT mention orientation, rotation, degrees, or
+"machine embroidery" in the caption. Write the "caption" as one brief sentence of about 8-12 words
+naming the subject, and give 3 to 8 short lowercase search "tags". For "rotate", output the clockwise
+degrees to make the design read upright — "0", "90", "180" or "270" — using "0" unless a clearly
+recognizable subject (a face, animal, or letter) appears sideways or upside down.`
 
 // Classify sends a rendered PNG to the vision model and returns structured
 // attributes, constrained to the schema via Kronk's json_schema grammar.
@@ -440,8 +480,8 @@ func (e *Engine) Classify(ctx context.Context, png []byte, hint string) (Classif
 		return Classification{}, err
 	}
 
-	// Downscaling the image is the biggest speed lever (see classifyImageSize).
-	if small, derr := downscalePNG(png, classifyImageSize); derr == nil {
+	// Downscaling the image is a primary speed lever (see defaultClassifyPx).
+	if small, derr := downscalePNG(png, e.classifyPx); derr == nil {
 		png = small
 	}
 
@@ -461,9 +501,10 @@ func (e *Engine) Classify(ctx context.Context, png []byte, hint string) (Classif
 		// the loop without starving the output (1.3 + frequency penalty produced
 		// empty captions); mergeTags also dedups/caps downstream.
 		"repeat_penalty": 1.15,
-		// Bounded: the structured object is small, and a tight cap limits any
-		// runaway the grammar still permits.
-		"max_tokens": 512,
+		// Bounded: the structured object is small (~120-200 tokens for all 7 fields),
+		// and a tight cap limits any runaway the grammar still permits. repairJSON
+		// handles a rare truncation; caption (first field) always survives.
+		"max_tokens": 320,
 	}
 
 	ictx, cancel := withDefaultTimeout(ctx, 4*time.Minute)
@@ -498,9 +539,18 @@ func (e *Engine) streamText(ctx context.Context, krn *kronk.Kronk, d model.D) (s
 			content = c.Delta.Content
 		}
 		if c.FinishReason() == "error" {
+			// A cancelled/expired context surfaces as a model "error" event with a
+			// "context canceled" message — return the real context error so callers
+			// can distinguish a user stop from a genuine model failure.
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
 			return "", fmt.Errorf("model error: %s", content)
 		}
 		sb.WriteString(content)
+	}
+	if ctx.Err() != nil {
+		return "", ctx.Err()
 	}
 	return strings.TrimSpace(sb.String()), nil
 }
@@ -639,14 +689,10 @@ func classificationSchema() model.D {
 	return model.D{
 		"type": "object",
 		"properties": model.D{
-			"caption":  str,
-			"elements": strArr,
-			"style":    str,
-			"theme":    str,
-			"mood":     str,
-			"tags":     strArr,
-			"rotate":   model.D{"type": "string", "enum": []string{"0", "90", "180", "270"}},
+			"caption": str,
+			"tags":    strArr,
+			"rotate":  model.D{"type": "string", "enum": []string{"0", "90", "180", "270"}},
 		},
-		"required": []string{"caption", "elements", "style", "theme", "mood", "tags", "rotate"},
+		"required": []string{"caption", "tags", "rotate"},
 	}
 }
