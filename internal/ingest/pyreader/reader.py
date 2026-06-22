@@ -52,6 +52,23 @@ def main(argv):
         return 2
     path = argv[1]
 
+    # Fail fast with a clear reason for files that aren't real embroidery files —
+    # empty, encrypted, or corrupt. Otherwise pyembroidery dies deep in its parser
+    # with a cryptic "NoneType" TypeError that looks like a tool bug.
+    try:
+        size = os.path.getsize(path)
+    except OSError as e:
+        sys.stderr.write("cannot read file: %s\n" % e)
+        return 4
+    if size == 0:
+        sys.stderr.write("empty file (0 bytes)\n")
+        return 4
+    if os.path.splitext(path)[1].lower() in (".pes", ".pec"):
+        with open(path, "rb") as fh:
+            if not fh.read(4).startswith(b"#PE"):  # valid PES/PEC start with #PES/#PEC
+                sys.stderr.write("not a valid PES/PEC file (bad header — likely encrypted or corrupt)\n")
+                return 4
+
     try:
         import pyembroidery as pe
     except ImportError as e:
