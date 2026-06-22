@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -143,6 +144,7 @@ type ListFilter struct {
 	MaxColors       int      `json:"maxColors"`
 	Search          string   `json:"search"`
 	VirtualFolderID string   `json:"virtualFolderID"`
+	DuplicatesOnly  bool     `json:"duplicatesOnly"`
 	Limit           int      `json:"limit"`
 	Offset          int      `json:"offset"`
 }
@@ -473,9 +475,18 @@ func (s *CatalogService) runClassify(ctx context.Context, todo []catalog.Design)
 
 	var done, classified, failed int
 	for r := range results {
+		// StopClassify cancels ctx; in-flight work then aborts with a cancellation
+		// error. That's user-initiated, not a failure — skip it silently (no event,
+		// no counts) so the user doesn't see spurious "context canceled" errors.
+		if classifyCanceled(ctx, r.err) {
+			continue
+		}
 		done++
 		if r.err == nil {
 			r.err = s.eng.SaveClassification(ctx, r.design.ID, r.data)
+		}
+		if classifyCanceled(ctx, r.err) {
+			continue
 		}
 		if r.err != nil {
 			failed++
@@ -493,6 +504,13 @@ func (s *CatalogService) runClassify(ctx context.Context, todo []catalog.Design)
 	})
 	_ = beeep.Notify("StitchVault — classificação concluída",
 		fmt.Sprintf("Classificados %d de %d designs.", classified, total), s.appIcon)
+}
+
+// classifyCanceled reports whether err is a user-cancellation artifact (StopClassify
+// cancelled the batch ctx) rather than a real classification failure. The batch ctx
+// has no deadline, so ctx.Err() is non-nil only when the user stopped the run.
+func classifyCanceled(ctx context.Context, err error) bool {
+	return err != nil && (ctx.Err() != nil || errors.Is(err, context.Canceled))
 }
 
 // ListFolders returns the current LLM-generated virtual folders with counts.
@@ -587,6 +605,7 @@ func toFilter(f ListFilter) catalog.Filter {
 		MaxColors:       f.MaxColors,
 		Search:          f.Search,
 		VirtualFolderID: f.VirtualFolderID,
+		DuplicatesOnly:  f.DuplicatesOnly,
 		Limit:           f.Limit,
 		Offset:          f.Offset,
 	}

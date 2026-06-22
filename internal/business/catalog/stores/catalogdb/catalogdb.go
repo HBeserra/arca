@@ -445,6 +445,13 @@ func decodeFloatSlice(v any) []float32 {
 
 // buildWhere turns a Filter into a parameterized WHERE clause (with a leading
 // " WHERE " when non-empty) and its positional args.
+// dupSignatureExpr is a per-design content fingerprint used to detect duplicates:
+// identical stitch count, colours and dimensions. Built as a string so it works as
+// both a SELECT expression and a GROUP BY key without DuckDB row-value support.
+const dupSignatureExpr = `CAST(stitch_count AS VARCHAR) || '|' || CAST(color_count AS VARCHAR) || '|' || ` +
+	`CAST(color_changes AS VARCHAR) || '|' || CAST(ROUND(width_mm, 1) AS VARCHAR) || '|' || ` +
+	`CAST(ROUND(height_mm, 1) AS VARCHAR)`
+
 func buildWhere(f catalog.Filter) (string, []any) {
 	var conds []string
 	var args []any
@@ -486,6 +493,13 @@ func buildWhere(f catalog.Filter) (string, []any) {
 	}
 	if f.VirtualFolderID != "" {
 		addCmp("virtual_folder_id = $%d", f.VirtualFolderID)
+	}
+	if f.DuplicatesOnly {
+		// A design is a "duplicate" when its content signature (stitch count,
+		// colours, dimensions) is shared by 2+ designs anywhere in the catalog.
+		// Computed over the whole table, independent of the other filters. No args.
+		conds = append(conds, dupSignatureExpr+" IN (SELECT "+dupSignatureExpr+
+			" FROM designs WHERE stitch_count > 0 GROUP BY 1 HAVING COUNT(*) > 1)")
 	}
 
 	if len(conds) == 0 {

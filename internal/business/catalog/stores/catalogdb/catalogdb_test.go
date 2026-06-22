@@ -197,3 +197,39 @@ func TestSettings(t *testing.T) {
 		t.Errorf("upsert get = %q, want http://y/b.gguf", v)
 	}
 }
+
+func TestDuplicatesFilter(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	// Two roses with the same content signature (stitch/colours/dimensions) at
+	// different paths, plus a unique lion.
+	r1 := rose()
+	r2 := rose()
+	r2.ID = catalog.DesignID("/a/rose-copy.pes")
+	r2.Path = "/a/rose-copy.pes"
+	r2.FileName = "rose-copy.pes"
+	for _, d := range []catalog.Design{r1, r2, lion()} {
+		if err := s.InsertDesign(ctx, d); err != nil {
+			t.Fatalf("insert %s: %v", d.FileName, err)
+		}
+	}
+
+	n, err := s.CountDesigns(ctx, catalog.Filter{DuplicatesOnly: true})
+	if err != nil {
+		t.Fatalf("count duplicates: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("DuplicatesOnly count = %d, want 2 (the two roses)", n)
+	}
+
+	list, err := s.ListDesigns(ctx, catalog.Filter{DuplicatesOnly: true})
+	if err != nil {
+		t.Fatalf("list duplicates: %v", err)
+	}
+	for _, d := range list {
+		if d.FileName == "lion.dst" {
+			t.Error("unique design (lion) must not appear under DuplicatesOnly")
+		}
+	}
+}

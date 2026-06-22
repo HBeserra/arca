@@ -53,6 +53,7 @@ type Filter struct {
 	MaxColors   int
 	Search          string // case-insensitive substring of the file name
 	VirtualFolderID string // restrict to one LLM-generated folder; "" = any
+	DuplicatesOnly  bool   // only designs whose content signature appears 2+ times
 	Limit           int
 	Offset          int
 }

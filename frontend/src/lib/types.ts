@@ -52,6 +52,7 @@ export interface ListFilter {
   maxColors: number;
   search: string;
   virtualFolderID: string;
+  duplicatesOnly: boolean;
   limit: number;
   offset: number;
 }
@@ -66,6 +67,7 @@ export const emptyFilter: ListFilter = {
   maxColors: 0,
   search: "",
   virtualFolderID: "",
+  duplicatesOnly: false,
   limit: 500,
   offset: 0,
 };

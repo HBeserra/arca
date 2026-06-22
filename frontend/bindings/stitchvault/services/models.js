@@ -827,6 +827,13 @@ export class ListFilter {
              */
             this["virtualFolderID"] = "";
         }
+        if (!("duplicatesOnly" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["duplicatesOnly"] = false;
+        }
         if (!("limit" in $$source)) {
             /**
              * @member

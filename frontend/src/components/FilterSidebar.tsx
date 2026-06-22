@@ -1,4 +1,4 @@
-import { Check, FolderTree, Folder, Sparkles, Loader2, X, Cpu, MemoryStick } from "lucide-react";
+import { Check, FolderTree, Folder, Sparkles, Loader2, X, Cpu, MemoryStick, CopyCheck } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
@@ -47,7 +47,8 @@ export function FilterSidebar({
     filter.formats.length +
     (filter.minSizeMM > 0 || filter.maxSizeMM > 0 ? 1 : 0) +
     (filter.minStitches > 0 || filter.maxStitches > 0 ? 1 : 0) +
-    (filter.minColors > 0 || filter.maxColors > 0 ? 1 : 0);
+    (filter.minColors > 0 || filter.maxColors > 0 ? 1 : 0) +
+    (filter.duplicatesOnly ? 1 : 0);
 
   return (
     <div className="flex flex-col h-full">
@@ -67,6 +68,30 @@ export function FilterSidebar({
 
       <ScrollArea className="flex-1">
         <div className="p-3 space-y-5">
+          {/* Duplicates toggle */}
+          <button
+            onClick={() => set({ duplicatesOnly: !filter.duplicatesOnly })}
+            className={cn(
+              "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors",
+              filter.duplicatesOnly ? "bg-accent text-accent-foreground" : "hover:bg-muted"
+            )}
+            title="Mostrar apenas designs com cópias (mesma contagem de pontos, cores e dimensões)"
+          >
+            <span className="flex items-center gap-1.5">
+              <CopyCheck className="h-3.5 w-3.5 opacity-70" /> Apenas duplicados
+            </span>
+            <span
+              className={cn(
+                "flex h-3.5 w-3.5 items-center justify-center rounded-sm border",
+                filter.duplicatesOnly
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-muted-foreground/40"
+              )}
+            >
+              {filter.duplicatesOnly && <Check className="h-3 w-3" />}
+            </span>
+          </button>
+
           {/* Formats */}
           <section className="space-y-1.5">
             <h3 className="text-xs font-medium text-muted-foreground">Formato</h3>
