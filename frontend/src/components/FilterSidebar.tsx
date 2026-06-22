@@ -207,15 +207,13 @@ export function FilterSidebar({
                       key={f.id}
                       onClick={() => set({ virtualFolderID: active ? "" : f.id })}
                       className={cn(
-                        "flex w-full items-center justify-between gap-1 rounded-md px-2 py-1 text-sm transition-colors",
+                        "flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-sm transition-colors",
                         active ? "bg-accent text-accent-foreground" : "hover:bg-muted"
                       )}
                     >
-                      <span className="flex items-center gap-1.5 truncate">
-                        <Folder className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
-                        <span className="truncate">{f.name}</span>
-                      </span>
-                      <span className="text-xs text-muted-foreground">{f.count}</span>
+                      <Folder className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
+                      <span className="min-w-0 flex-1 truncate text-left">{f.name}</span>
+                      <span className="flex-shrink-0 text-xs text-muted-foreground">{f.count}</span>
                     </button>
                   );
                 })}
