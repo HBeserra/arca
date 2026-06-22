@@ -62,3 +62,20 @@ func TestRepairJSONControlChars(t *testing.T) {
 		}
 	})
 }
+
+// TestSalvageCaption covers the last-resort caption extraction from JSON that's
+// broken beyond repairJSON (single-quoted tags, unterminated caption string).
+func TestSalvageCaption(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`{"caption": "Western cowboy boot with cactus and spurs design.}, tags: 'cowboy', 'spur'`, "Western cowboy boot with cactus and spurs design."},
+		{`{"caption": "A red rose", "tags": ["rose"]}`, "A red rose"},
+		{"{\"caption\": \"unterminated\nmore", "unterminated"},
+		{`{"tags": ["x"]}`, ""},
+		{`total garbage`, ""},
+	}
+	for _, c := range cases {
+		if got := salvageCaption(c.in); got != c.want {
+			t.Errorf("salvageCaption(%.50q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

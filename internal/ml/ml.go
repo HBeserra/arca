@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -579,6 +580,14 @@ func (e *Engine) Classify(ctx context.Context, png []byte, hint string) (Classif
 
 	var out Classification
 	if err := unmarshalLoose(content, &out); err != nil {
+		// Last resort: a small VLM occasionally breaks the JSON structure (single
+		// quotes, an unterminated string) beyond what repairJSON can fix. Salvage at
+		// least the caption so the design still gets a searchable description instead
+		// of failing the whole classification.
+		if cap := salvageCaption(content); cap != "" {
+			e.log.Warn("ml: classify: malformed JSON, salvaged caption only", "caption", cap)
+			return Classification{Caption: cap}, nil
+		}
 		return Classification{}, fmt.Errorf("ml: classify: decode %.160q: %w", content, err)
 	}
 	return out, nil
@@ -654,6 +663,19 @@ func unmarshalLoose(s string, dst any) error {
 		return nil
 	}
 	return json.Unmarshal([]byte(repairJSON(s)), dst)
+}
+
+// captionSalvageRe loosely extracts the caption value from model output, tolerating
+// an unterminated string (it stops at a quote, brace, or newline) and capping length.
+var captionSalvageRe = regexp.MustCompile(`"caption"\s*:\s*"([^"}\n]{1,200})`)
+
+// salvageCaption pulls a usable caption out of malformed JSON as a last resort.
+func salvageCaption(s string) string {
+	m := captionSalvageRe.FindStringSubmatch(s)
+	if len(m) != 2 {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
 }
 
 // repairJSON makes a slightly-malformed model JSON document parseable: it escapes
