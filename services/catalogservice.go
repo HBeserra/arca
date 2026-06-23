@@ -590,6 +590,39 @@ func (s *CatalogService) EjectModels() error {
 	return s.eng.EjectModels(context.Background())
 }
 
+// ServiceShutdown is invoked by Wails during application termination — synchronously,
+// on the main thread, BEFORE the process calls exit(). It unloads the ML models so
+// llama.cpp's Metal backend releases its GPU residency sets while the device is still
+// valid. Without this, the ggml_metal_device C++ static destructor runs at exit() with
+// model buffers still live and aborts the whole process with
+// GGML_ASSERT([rsets->data count] == 0) (ggml-metal-device.m) — a SIGABRT every time
+// the user quits with a model loaded. A running batch classify is cancelled and drained
+// first so we never free a model out from under an in-flight inference.
+func (s *CatalogService) ServiceShutdown() error {
+	// Cancel an in-flight batch classify, then wait (bounded) for its workers to
+	// observe the cancellation and return before we unload.
+	s.mu.Lock()
+	if s.classifyCancel != nil {
+		s.classifyCancel()
+	}
+	s.mu.Unlock()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.mu.Lock()
+		busy := s.classifyCancel != nil || s.foldersBusy
+		s.mu.Unlock()
+		if !busy || !time.Now().Before(deadline) {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return s.eng.EjectModels(ctx)
+}
+
 // VisionModels returns the model picker options and the active one.
 func (s *CatalogService) VisionModels() (*VisionModelInfo, error) {
 	current := s.eng.CurrentVisionModel()
