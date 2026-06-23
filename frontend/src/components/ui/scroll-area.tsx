@@ -7,7 +7,12 @@ const ScrollArea = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root>
 >(({ className, children, ...props }, ref) => (
   <ScrollAreaPrimitive.Root ref={ref} className={cn("relative overflow-hidden", className)} {...props}>
-    <ScrollAreaPrimitive.Viewport className="h-full w-full rounded-[inherit]">
+    {/* Force Radix's inner content wrapper to block/min-w-0: it ships inline
+        `display:table; min-width:100%`, which grows to the widest child and defeats
+        `truncate` (long virtual-folder names overflowed the sidebar). Block layout
+        keeps vertical scroll and lets children truncate. No usage needs horizontal
+        scroll, so disabling that growth is safe. */}
+    <ScrollAreaPrimitive.Viewport className="h-full w-full rounded-[inherit] [&>div]:block! [&>div]:min-w-0!">
       {children}
     </ScrollAreaPrimitive.Viewport>
     <ScrollBar />

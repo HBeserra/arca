@@ -426,7 +426,7 @@ func (e *Engine) GenerateFolders(ctx context.Context, targetCount int) ([]Virtua
 	}
 	var folders []folder
 	for _, f := range parsed.Folders {
-		name := strings.TrimSpace(f.Name)
+		name := shortFolderName(f.Name)
 		if name == "" {
 			continue
 		}
@@ -548,7 +548,7 @@ func buildTaxonomyPrompt(designs []Design, targetCount int, lang string) string 
 		b.WriteString("\n")
 	}
 	fmt.Fprintf(&b, "Propose about %d concise, mutually distinct folder categories that organize the whole library.\n", targetCount)
-	b.WriteString(`Each folder name MUST be just 1-2 words naming the theme — do NOT include the words "Machine", "Embroidery", "Design", "Designs", "Pattern" or "Motif". Give each folder a one-sentence description.`)
+	b.WriteString(`Each folder name MUST be no more than 3 words naming the theme (1-2 is better) — do NOT include the words "Machine", "Embroidery", "Design", "Designs", "Pattern" or "Motif". Give each folder a one-sentence description.`)
 	if d := folderLangDirective(lang); d != "" {
 		b.WriteString("\n\n")
 		b.WriteString(d)
@@ -641,6 +641,25 @@ func cleanName(fileName string) string {
 	name := strings.TrimSuffix(fileName, filepath.Ext(fileName))
 	name = strings.NewReplacer("_", " ", "-", " ", ".", " ").Replace(name)
 	return strings.Join(strings.Fields(name), " ")
+}
+
+// maxFolderNameWords is the hard cap on a virtual-folder name. Small LLMs routinely
+// ignore the prompt's word limit, so the proposed name is clamped here — this is the
+// guarantee that the sidebar can render every folder name without overflowing.
+const maxFolderNameWords = 3
+
+// shortFolderName collapses whitespace and keeps at most maxFolderNameWords words,
+// with a rune-safe character cap as a final guard against a single very long word.
+func shortFolderName(name string) string {
+	fields := strings.Fields(name)
+	if len(fields) > maxFolderNameWords {
+		fields = fields[:maxFolderNameWords]
+	}
+	name = strings.Join(fields, " ")
+	if r := []rune(name); len(r) > 28 {
+		name = strings.TrimSpace(string(r[:28]))
+	}
+	return name
 }
 
 // classifyHint builds the textual context handed to the vision model: the cleaned

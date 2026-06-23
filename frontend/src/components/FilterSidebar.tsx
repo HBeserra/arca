@@ -212,7 +212,7 @@ export function FilterSidebar({
                       )}
                     >
                       <Folder className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
-                      <span className="min-w-0 flex-1 truncate text-left">{f.name}</span>
+                      <span className="min-w-0 flex-1 truncate text-left" title={f.name}>{f.name}</span>
                       <span className="flex-shrink-0 text-xs text-muted-foreground">{f.count}</span>
                     </button>
                   );
