@@ -85,6 +85,8 @@ func decode(ext string, c *cursor, b *builder) error {
 		return readPECFile(c, b)
 	case ".pes":
 		return readPES(c, b)
+	case ".phc":
+		return readPHC(c, b)
 	case ".jef":
 		return readJEF(c, b)
 	case ".sew":

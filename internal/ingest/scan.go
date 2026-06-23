@@ -13,7 +13,7 @@ import (
 // there and an entry here.
 var SupportedExts = map[string]bool{
 	".dst": true, ".exp": true, ".jef": true, ".pec": true, ".pes": true,
-	".sew": true, ".u01": true, ".vp3": true, ".xxx": true,
+	".phc": true, ".sew": true, ".u01": true, ".vp3": true, ".xxx": true,
 }
 
 // IsSupported reports whether path has a recognized embroidery extension.
