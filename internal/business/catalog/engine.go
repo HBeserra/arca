@@ -358,8 +358,9 @@ func mergeTags(lists ...[]string) []string {
 	for _, list := range lists {
 		for _, s := range list {
 			s = strings.ToLower(strings.TrimSpace(s))
-			// Drop empties, dupes, and run-on "tags" (repetition artifacts).
-			if s == "" || seen[s] || len(s) > 40 || len(strings.Fields(s)) > 4 {
+			// Drop empties, dupes, run-on "tags" (repetition artifacts), and
+			// medium tags ("embroidery", "design", …) that every design shares.
+			if s == "" || seen[s] || isMetaTag(s) || len(s) > 40 || len(strings.Fields(s)) > 4 {
 				continue
 			}
 			seen[s] = true
@@ -370,6 +371,21 @@ func mergeTags(lists ...[]string) []string {
 		}
 	}
 	return out
+}
+
+// metaTagWords describe the embroidery medium rather than the subject. Since every
+// catalogued image is an embroidery design, these add no search value.
+var metaTagWords = map[string]bool{
+	"design": true, "designs": true, "pattern": true, "patterns": true,
+	"motif": true, "motifs": true, "stitch": true, "stitches": true, "stitching": true,
+	"desenho": true, "padrão": true, "padrao": true, "diseño": true, "diseno": true,
+	"image": true, "imagem": true, "picture": true,
+}
+
+// isMetaTag reports whether a (lowercased) tag is about the embroidery medium
+// itself — any tag mentioning embroidery/bordado, or a bare design/pattern word.
+func isMetaTag(s string) bool {
+	return metaTagWords[s] || strings.Contains(s, "embroider") || strings.Contains(s, "bordad")
 }
 
 // ─── virtual folders (LLM-driven) ───────────────────────────────────────────

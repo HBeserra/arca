@@ -95,9 +95,9 @@ type CaptionLang struct {
 // CaptionLanguagePresets returns the selectable caption/tags languages.
 func CaptionLanguagePresets() []CaptionLang {
 	return []CaptionLang{
-		{Code: "pt", Label: "Português", instruction: `IMPORTANTE: escreva a "caption" e cada item de "tags" em PORTUGUÊS do Brasil. Nunca use inglês.`},
-		{Code: "en", Label: "English", instruction: `Write the "caption" and every "tags" entry in English.`},
-		{Code: "es", Label: "Español", instruction: `IMPORTANTE: escribe la "caption" y cada elemento de "tags" en ESPAÑOL. Nunca uses inglés.`},
+		{Code: "pt", Label: "Português", instruction: `IMPORTANTE: escreva a "caption" e cada item de "tags" em PORTUGUÊS do Brasil. Nunca use inglês. Vá direto ao assunto: NÃO comece com "bordado", "desenho de bordado" nem "a imagem mostra", e não inclua dimensões (ex.: "Menina de touca e vestido", não "Bordado de uma menina…"). Nas tags não use "bordado" nem "desenho".`},
+		{Code: "en", Label: "English", instruction: `Write the "caption" and every "tags" entry in English. Name the subject directly: do NOT start with "a machine-embroidery design" and do not mention embroidery or dimensions (e.g. "Child in a bonnet and dress", not "A machine-embroidery design of a child…"). In tags never use "embroidery" or "design".`},
+		{Code: "es", Label: "Español", instruction: `IMPORTANTE: escribe la "caption" y cada elemento de "tags" en ESPAÑOL. Nunca uses inglés. Nombra el sujeto directamente: NO empieces con "bordado" ni "diseño de bordado", y no incluyas dimensiones (p. ej. "Niña con gorro y vestido", no "Diseño de bordado de una niña…"). En las tags no uses "bordado" ni "diseño".`},
 	}
 }
 
@@ -584,12 +584,13 @@ func (e *Engine) Classify(ctx context.Context, png []byte, hint string) (Classif
 		// quotes, an unterminated string) beyond what repairJSON can fix. Salvage at
 		// least the caption so the design still gets a searchable description instead
 		// of failing the whole classification.
-		if cap := salvageCaption(content); cap != "" {
+		if cap := cleanCaption(salvageCaption(content)); cap != "" {
 			e.log.Warn("ml: classify: malformed JSON, salvaged caption only", "caption", cap)
 			return Classification{Caption: cap}, nil
 		}
 		return Classification{}, fmt.Errorf("ml: classify: decode %.160q: %w", content, err)
 	}
+	out.Caption = cleanCaption(out.Caption)
 	return out, nil
 }
 
@@ -676,6 +677,50 @@ func salvageCaption(s string) string {
 		return ""
 	}
 	return strings.TrimSpace(m[1])
+}
+
+// --- caption cleanup -------------------------------------------------------
+//
+// Every catalogued image IS an embroidery design, so a caption that opens with
+// "a machine-embroidery design of …" (or the PT/ES equivalent) and echoes the
+// already-stored dimensions wastes words and pollutes the search embedding. Small
+// VLMs ignore the prompt's "don't say machine embroidery" directive, so the filler
+// is also stripped deterministically here.
+
+const (
+	capEmbWord = `(?:machine[\s-]?embroidery|embroidery|bordado(?:\s+a\s+máquina)?)`
+	capNoun    = `(?:designs?|patterns?|motifs?|graphics?|artworks?|imagens|imagem|imagen|images?|pictures?|photos?|illustrations?|desenhos?|padr(?:ão|ões)|projetos?|fotos?|dise[nñ]os?|patr[oó]n(?:es)?)`
+	// Articles, longest-first: RE2 prefers the leftmost alternative, so a short
+	// prefix ("um") must not win over a longer article ("uma") when both complete.
+	capArt  = `(?:the|uma|una|los|las|um|un|an|el|la|os|as|a|o)`
+	capConn = `(?:of|featuring|showing|depicting|portraying|with|that\s+depicts|that\s+shows|that\s+features|de|com|que\s+mostra|mostra|mostrando|apresenta|representando|que\s+muestra|muestra)`
+)
+
+// captionLeadRe matches a leading "<opener>? <article>? <embroidery|noun> <connective>"
+// clause — the filler before the real subject. A connective is required so a genuine
+// subject like "Floral pattern" (noun, no connective) is left intact.
+var captionLeadRe = regexp.MustCompile(`(?i)^\s*(?:this is|here is|it'?s|it is|esta? é|este es|esta es)?\s*` + capArt + `?\s*(?:` + capEmbWord + `(?:\s+` + capNoun + `)?|` + capNoun + `)\s+` + capConn + `\s+` + capArt + `?\s*`)
+
+// captionDimsRe strips a trailing dimensions clause ("… and dimensions of 40.8 x 54.9 mm").
+var captionDimsRe = regexp.MustCompile(`(?i)\s*[,;]?\s*(?:and|with|e|com)?\s*dimens\w+[^,;.]*?\d[\d.]*\s*[x×]\s*[\d.]+\s*mm\.?\s*$`)
+
+// captionEmbTrailRe strips a trailing "… in/on an embroidery patch" / "… em uma faixa de bordado" clause.
+var captionEmbTrailRe = regexp.MustCompile(`(?i)\s*[,;]?\s+(?:in|on|as|em|no|na|num|numa|como)\s+[^,;.]*?(?:embroider\w*|bordad\w*)\b\.?\s*$`)
+
+// cleanCaption removes redundant embroidery/dimension filler, keeping the subject.
+// It is conservative: if stripping would leave nothing usable, the original caption
+// is returned unchanged.
+func cleanCaption(s string) string {
+	orig := strings.TrimSpace(s)
+	c := captionLeadRe.ReplaceAllString(orig, "")
+	c = captionDimsRe.ReplaceAllString(c, "")
+	c = captionEmbTrailRe.ReplaceAllString(c, "")
+	c = strings.Trim(strings.TrimSpace(c), " ,;.")
+	if len([]rune(c)) < 2 {
+		return orig // nothing meaningful left — keep what the model produced
+	}
+	r := []rune(c)
+	return strings.ToUpper(string(r[0])) + string(r[1:])
 }
 
 // repairJSON makes a slightly-malformed model JSON document parseable: it escapes
