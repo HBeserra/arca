@@ -11,13 +11,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 
 	"stitchvault/internal/business/catalog"
 	"stitchvault/internal/business/catalog/stores/catalogdb"
-	"stitchvault/internal/ingest/pyreader"
+	"stitchvault/internal/ingest/goreader"
 	"stitchvault/internal/ml"
 	"stitchvault/internal/render"
 	"stitchvault/services"
@@ -62,23 +61,9 @@ func main() {
 		log.Fatalf("catalogdb init: %v", err)
 	}
 
-	// pyreader never fails for a missing dependency at construction — the app
-	// always starts. EnsurePyembroidery bootstraps a venv + installs pyembroidery
-	// in the background (self-healing if the venv is ever removed); imports before
-	// it completes surface a clear per-file error.
-	reader, err := pyreader.New()
-	if err != nil {
-		log.Fatalf("pyreader init: %v", err)
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		if err := reader.EnsurePyembroidery(ctx); err != nil {
-			logger.Warn("pyembroidery unavailable — imports will fail until it is installed", "err", err)
-		} else {
-			logger.Info("pyembroidery ready")
-		}
-	}()
+	// Native Go embroidery reader — no Python, no external process, no bootstrap.
+	// Parses the common machine formats directly (see internal/ingest/goreader).
+	reader := goreader.New()
 
 	thumbs := thumbsDir()
 	var mlOpts []ml.Option

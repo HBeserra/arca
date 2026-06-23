@@ -15,7 +15,7 @@ import (
 	"stitchvault/internal/business/catalog"
 	"stitchvault/internal/business/catalog/stores/catalogdb"
 	"stitchvault/internal/embroidery"
-	"stitchvault/internal/ingest/pyreader"
+	"stitchvault/internal/ingest/goreader"
 	"stitchvault/internal/ml"
 	"stitchvault/internal/render"
 )
@@ -34,18 +34,12 @@ func copyFile(t *testing.T, src, dst string) {
 }
 
 // TestEngineImportEndToEnd exercises the full Phase-1 pipeline through the engine:
-// scan a directory tree → parse (pyreader) → render thumbnails → store → query.
+// scan a directory tree → parse (native Go reader) → render thumbnails → store → query.
 func TestEngineImportEndToEnd(t *testing.T) {
-	reader, err := pyreader.New()
-	if err != nil {
-		t.Skipf("pyreader unavailable: %v", err)
-	}
-	if err := reader.Check(context.Background()); err != nil {
-		t.Skipf("pyembroidery not installed: %v", err)
-	}
+	reader := goreader.New()
 
 	// Build a small tree (with a subfolder) from the shared fixtures.
-	const fixtures = "../../ingest/pyreader/testdata"
+	const fixtures = "../../ingest/goreader/testdata"
 	root := t.TempDir()
 	copyFile(t, filepath.Join(fixtures, "sample.pes"), filepath.Join(root, "flower.pes"))
 	copyFile(t, filepath.Join(fixtures, "sample.dst"), filepath.Join(root, "lion.dst"))
@@ -239,12 +233,12 @@ func (fakeClassifier) Embed(_ context.Context, text string) ([]float32, error) {
 func (fakeClassifier) Complete(_ context.Context, _ string, _ map[string]any) (string, error) {
 	return `{"folders":[{"name":"Animals","description":"cats dogs and other animals"},{"name":"Shapes","description":"geometric shapes and patterns"}]}`, nil
 }
-func (fakeClassifier) Concurrency() int            { return 1 }
-func (fakeClassifier) VisionModel() string         { return "fake" }
-func (fakeClassifier) SetVisionModel(_ string)      {}
-func (fakeClassifier) CaptionLanguage() string      { return "pt" }
-func (fakeClassifier) SetCaptionLanguage(_ string)  {}
-func (fakeClassifier) Loaded() bool                { return true }
+func (fakeClassifier) Concurrency() int               { return 1 }
+func (fakeClassifier) VisionModel() string            { return "fake" }
+func (fakeClassifier) SetVisionModel(_ string)        {}
+func (fakeClassifier) CaptionLanguage() string        { return "pt" }
+func (fakeClassifier) SetCaptionLanguage(_ string)    {}
+func (fakeClassifier) Loaded() bool                   { return true }
 func (fakeClassifier) Unload(_ context.Context) error { return nil }
 
 // TestGenerateFoldersMechanism verifies taxonomy parsing, folder embedding, cosine

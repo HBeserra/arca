@@ -1,35 +1,18 @@
-package pyreader_test
+package goreader
 
 import (
 	"context"
 	"testing"
-
-	"stitchvault/internal/ingest/pyreader"
 )
 
-// newReaderOrSkip builds a pyreader, skipping the test when Python/pyembroidery
-// is not available so CI without the dependency stays green.
-func newReaderOrSkip(t *testing.T) *pyreader.Reader {
-	t.Helper()
-	r, err := pyreader.New()
-	if err != nil {
-		t.Skipf("pyreader unavailable: %v", err)
-	}
-	if err := r.Check(context.Background()); err != nil {
-		t.Skipf("pyembroidery not installed (install it to run): %v", err)
-	}
-	return r
-}
-
-// TestReadPES checks the colourful format: units, counts, bounding box, palette.
+// TestReadPES checks the colourful Brother format on a real sample: units, counts,
+// bounding box and palette. Mirrors the assertions the old pyreader test made, now
+// satisfied by the native reader.
 func TestReadPES(t *testing.T) {
-	r := newReaderOrSkip(t)
-
-	d, err := r.Read(context.Background(), "testdata/sample.pes")
+	d, err := New().Read(context.Background(), "testdata/sample.pes")
 	if err != nil {
 		t.Fatalf("Read sample.pes: %v", err)
 	}
-
 	if d.Format != ".pes" {
 		t.Errorf("Format = %q, want .pes", d.Format)
 	}
@@ -42,8 +25,7 @@ func TestReadPES(t *testing.T) {
 	if got := len(d.Palette()); got != 2 {
 		t.Errorf("Palette = %d threads, want 2", got)
 	}
-
-	// The fixture is a 10mm square (x:0..10) plus a triangle out to x=30, y:0..8.
+	// The fixture is a 10mm square plus a triangle out to x=30, y:0..8.
 	w, h := d.SizeMM()
 	if w < 28 || w > 32 {
 		t.Errorf("width = %.1f mm, want ~30", w)
@@ -53,16 +35,13 @@ func TestReadPES(t *testing.T) {
 	}
 }
 
-// TestReadDST checks the colourless format: stitches present, empty palette, but
-// the renderer-facing Blocks() still yields blocks (with default colours).
+// TestReadDST checks the colourless Tajima format: stitches present, empty palette,
+// but Blocks() still yields renderable blocks (with default colours).
 func TestReadDST(t *testing.T) {
-	r := newReaderOrSkip(t)
-
-	d, err := r.Read(context.Background(), "testdata/sample.dst")
+	d, err := New().Read(context.Background(), "testdata/sample.dst")
 	if err != nil {
 		t.Fatalf("Read sample.dst: %v", err)
 	}
-
 	if d.Format != ".dst" {
 		t.Errorf("Format = %q, want .dst", d.Format)
 	}
@@ -79,9 +58,16 @@ func TestReadDST(t *testing.T) {
 
 // TestReadMissingFile surfaces a clear error (and does not hang) for a bad path.
 func TestReadMissingFile(t *testing.T) {
-	r := newReaderOrSkip(t)
-
-	if _, err := r.Read(context.Background(), "testdata/does-not-exist.pes"); err == nil {
+	if _, err := New().Read(context.Background(), "testdata/does-not-exist.pes"); err == nil {
 		t.Fatal("Read of missing file: want error, got nil")
+	}
+}
+
+// TestReadCanceledContext verifies a cancelled context aborts before any work.
+func TestReadCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := New().Read(ctx, "testdata/sample.dst"); err == nil {
+		t.Fatal("Read with cancelled context: want error, got nil")
 	}
 }

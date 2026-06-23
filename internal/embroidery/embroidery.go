@@ -1,21 +1,20 @@
 // Package embroidery defines a neutral, library-independent domain model for an
-// embroidery design. It is the contract every Reader adapter must produce — the
-// pyembroidery subprocess today, a native Go parser tomorrow — so that everything
-// downstream (render, metadata, classification) is written once against this type.
+// embroidery design. It is the contract the Reader must produce — today the native
+// Go reader in internal/ingest/goreader — so that everything downstream (render,
+// metadata, classification) is written once against this type.
 //
-// Canonical conventions every Reader MUST respect:
-//   - Coordinates are in millimetres (float64). pyembroidery uses tenths of a
-//     millimetre, so the adapter divides by 10.
+// Canonical conventions the Reader MUST respect:
+//   - Coordinates are in millimetres (float64). Embroidery formats store tenths of a
+//     millimetre, so the reader divides by 10.
 //   - The Y axis points DOWN (screen / image convention). This matches the raster
-//     produced by the renderer, so no axis flip happens anywhere in Go. If a sample
-//     ever renders vertically mirrored, fix it in exactly one place: the INVERT_Y
-//     toggle inside reader.py.
+//     produced by the renderer, so no axis flip happens anywhere in Go. Each format
+//     decoder negates Y at the point it reads a delta (mirroring the reference), so
+//     a vertically-mirrored sample is fixed there.
 package embroidery
 
 // Command is a single stitch operation. The integer values are the canonical
-// StitchVault set; each Reader adapter maps its source library's command set onto
-// these. reader.py defines the identical mapping on the Python side — keep them in
-// sync (see internal/ingest/pyreader/reader.py).
+// StitchVault set; the native reader maps each embroidery format's command set onto
+// these (see internal/ingest/goreader).
 type Command uint8
 
 const (

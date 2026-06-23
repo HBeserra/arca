@@ -6,14 +6,14 @@ import (
 	"strings"
 )
 
-// SupportedExts is the set of embroidery file extensions ScanDir collects. It is
-// a pragmatic subset of the 40+ formats pyembroidery can read — the common home
-// and commercial machine formats. Extending it is just adding an entry here.
+// SupportedExts is the set of embroidery file extensions ScanDir collects — the
+// common home and commercial machine formats the native Go reader parses
+// (internal/ingest/goreader). This set MUST stay in sync with goreader.decode,
+// which switches on the same extensions; extending support means adding a decoder
+// there and an entry here.
 var SupportedExts = map[string]bool{
-	".pes": true, ".pec": true, ".dst": true, ".exp": true, ".jef": true,
-	".vp3": true, ".vip": true, ".xxx": true, ".hus": true, ".sew": true,
-	".pcs": true, ".csd": true, ".dsb": true, ".jpx": true, ".u01": true,
-	".shv": true, ".emd": true, ".phb": true, ".phc": true, ".pcm": true,
+	".dst": true, ".exp": true, ".jef": true, ".pec": true, ".pes": true,
+	".sew": true, ".u01": true, ".vp3": true, ".xxx": true,
 }
 
 // IsSupported reports whether path has a recognized embroidery extension.
