@@ -179,6 +179,17 @@ export function ListFolders() {
 }
 
 /**
+ * OpenDesignFile opens a design's source file in the OS default application,
+ * cross-platform (macOS/Windows/Linux). The path is looked up from the catalog by
+ * id, so only a real catalogued file can ever be launched.
+ * @param {string} id
+ * @returns {$CancellablePromise<void>}
+ */
+export function OpenDesignFile(id) {
+    return $Call.ByID(4008612115, id);
+}
+
+/**
  * PickFiles opens a native multi-file dialog and returns the selected paths.
  * @returns {$CancellablePromise<string[]>}
  */
@@ -194,6 +205,16 @@ export function PickFiles() {
  */
 export function PickFolder() {
     return $Call.ByID(1191992382);
+}
+
+/**
+ * RevealDesignFile shows a design's source file in the system file manager
+ * (selected on macOS/Windows; containing folder on Linux), cross-platform.
+ * @param {string} id
+ * @returns {$CancellablePromise<void>}
+ */
+export function RevealDesignFile(id) {
+    return $Call.ByID(2619864566, id);
 }
 
 /**

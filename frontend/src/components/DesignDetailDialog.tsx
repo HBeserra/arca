@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
-import { Sparkles, Loader2, Trash2 } from "lucide-react";
+import { Sparkles, Loader2, Trash2, ExternalLink, FolderOpen } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,9 +20,14 @@ export function DesignDetailDialog({ design, classifyAvailable, onClose, onClass
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [fileAction, setFileAction] = useState<null | "open" | "reveal">(null);
+  const [fileError, setFileError] = useState("");
 
-  // Reset the delete confirmation whenever a different design is opened.
-  useEffect(() => setConfirmDelete(false), [design?.id]);
+  // Reset transient state whenever a different design is opened.
+  useEffect(() => {
+    setConfirmDelete(false);
+    setFileError("");
+  }, [design?.id]);
 
   const classify = async () => {
     if (!design) return;
@@ -44,6 +49,32 @@ export function DesignDetailDialog({ design, classifyAvailable, onClose, onClass
     } finally {
       setDeleting(false);
       setConfirmDelete(false);
+    }
+  };
+
+  const openFile = async () => {
+    if (!design) return;
+    setFileAction("open");
+    setFileError("");
+    try {
+      await CatalogService.OpenDesignFile(design.id);
+    } catch {
+      setFileError("Não foi possível abrir o arquivo — ele pode ter sido movido ou removido.");
+    } finally {
+      setFileAction(null);
+    }
+  };
+
+  const revealFile = async () => {
+    if (!design) return;
+    setFileAction("reveal");
+    setFileError("");
+    try {
+      await CatalogService.RevealDesignFile(design.id);
+    } catch {
+      setFileError("Não foi possível localizar o arquivo na pasta.");
+    } finally {
+      setFileAction(null);
     }
   };
 
@@ -127,28 +158,40 @@ export function DesignDetailDialog({ design, classifyAvailable, onClose, onClass
               </ScrollArea>
             </div>
 
-            <div className="flex items-center justify-end gap-2 border-t pt-3">
-              {confirmDelete ? (
-                <>
-                  <span className="mr-auto text-xs text-muted-foreground">Remover este bordado do vault?</span>
-                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setConfirmDelete(false)} disabled={deleting}>
-                    Cancelar
-                  </Button>
-                  <Button variant="destructive" size="sm" className="h-7 text-xs" onClick={doDelete} disabled={deleting}>
-                    {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                    Remover
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs text-destructive hover:text-destructive"
-                  onClick={() => setConfirmDelete(true)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" /> Remover do vault
+            <div className="space-y-2 border-t pt-3">
+              {fileError && <p className="text-xs text-destructive">{fileError}</p>}
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={openFile} disabled={fileAction !== null}>
+                  {fileAction === "open" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />}
+                  Abrir arquivo
                 </Button>
-              )}
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={revealFile} disabled={fileAction !== null}>
+                  {fileAction === "reveal" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FolderOpen className="h-3.5 w-3.5" />}
+                  Mostrar na pasta
+                </Button>
+
+                {confirmDelete ? (
+                  <>
+                    <span className="ml-auto text-xs text-muted-foreground">Remover este bordado do vault?</span>
+                    <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setConfirmDelete(false)} disabled={deleting}>
+                      Cancelar
+                    </Button>
+                    <Button variant="destructive" size="sm" className="h-7 text-xs" onClick={doDelete} disabled={deleting}>
+                      {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                      Remover
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto h-7 text-xs text-destructive hover:text-destructive"
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> Remover do vault
+                  </Button>
+                )}
+              </div>
             </div>
           </>
         )}

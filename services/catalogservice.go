@@ -17,6 +17,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"stitchvault/internal/business/catalog"
+	"stitchvault/internal/desktop"
 )
 
 // ─── Events ─────────────────────────────────────────────────────────────────
@@ -341,6 +342,40 @@ func (s *CatalogService) GetDesign(id string) (*DesignInfo, error) {
 	}
 	info := designToInfo(d)
 	return &info, nil
+}
+
+// OpenDesignFile opens a design's source file in the OS default application,
+// cross-platform (macOS/Windows/Linux). The path is looked up from the catalog by
+// id, so only a real catalogued file can ever be launched.
+func (s *CatalogService) OpenDesignFile(id string) error {
+	path, err := s.designPath(id)
+	if err != nil {
+		return err
+	}
+	return desktop.Open(path)
+}
+
+// RevealDesignFile shows a design's source file in the system file manager
+// (selected on macOS/Windows; containing folder on Linux), cross-platform.
+func (s *CatalogService) RevealDesignFile(id string) error {
+	path, err := s.designPath(id)
+	if err != nil {
+		return err
+	}
+	return desktop.Reveal(path)
+}
+
+// designPath resolves a design id to its absolute source path.
+func (s *CatalogService) designPath(id string) (string, error) {
+	did, err := uuid.Parse(id)
+	if err != nil {
+		return "", fmt.Errorf("catalog: invalid design id: %w", err)
+	}
+	d, err := s.eng.Get(context.Background(), did)
+	if err != nil {
+		return "", fmt.Errorf("catalog: get %s: %w", id, err)
+	}
+	return d.Path, nil
 }
 
 // Facets returns the catalog-wide facets for the filter sidebar.
@@ -707,7 +742,7 @@ type RestoreErrorEvent struct {
 func (s *CatalogService) ExportCatalog() error {
 	path, err := application.Get().Dialog.SaveFile().
 		SetMessage("Exportar catálogo").
-		SetFilename("catalogo" + svaultExt).
+		SetFilename("catalogo"+svaultExt).
 		AddFilter("StitchVault", "*"+svaultExt).
 		PromptForSingleSelection()
 	if err != nil || path == "" {
