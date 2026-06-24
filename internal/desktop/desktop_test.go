@@ -1,9 +1,24 @@
 package desktop
 
 import (
+	"errors"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
+
+// TestOpenRevealMissing checks that a non-existent file reports ErrNotFound (so the
+// caller can show "moved/removed" rather than a generic "couldn't open") without
+// ever launching anything.
+func TestOpenRevealMissing(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nope.pes")
+	if err := Open(missing); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Open(missing) = %v, want ErrNotFound", err)
+	}
+	if err := Reveal(missing); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Reveal(missing) = %v, want ErrNotFound", err)
+	}
+}
 
 func TestOpenArgs(t *testing.T) {
 	const path = "/x/a.pes"

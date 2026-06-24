@@ -58,8 +58,8 @@ export function DesignDetailDialog({ design, classifyAvailable, onClose, onClass
     setFileError("");
     try {
       await CatalogService.OpenDesignFile(design.id);
-    } catch {
-      setFileError("Não foi possível abrir o arquivo — ele pode ter sido movido ou removido.");
+    } catch (e) {
+      setFileError(errMsg(e) || "Não foi possível abrir o arquivo.");
     } finally {
       setFileAction(null);
     }
@@ -71,8 +71,8 @@ export function DesignDetailDialog({ design, classifyAvailable, onClose, onClass
     setFileError("");
     try {
       await CatalogService.RevealDesignFile(design.id);
-    } catch {
-      setFileError("Não foi possível localizar o arquivo na pasta.");
+    } catch (e) {
+      setFileError(errMsg(e) || "Não foi possível localizar o arquivo na pasta.");
     } finally {
       setFileAction(null);
     }
@@ -219,4 +219,11 @@ function formatBytes(n: number): string {
     i++;
   }
   return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+// errMsg extracts a displayable message from a rejected service call (Wails rejects
+// with a RuntimeError carrying the Go error string), capitalised for display.
+function errMsg(e: unknown): string {
+  const m = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  return m ? m.charAt(0).toUpperCase() + m.slice(1) : "";
 }

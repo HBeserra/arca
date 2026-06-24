@@ -5,13 +5,20 @@
 package desktop
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
+
+// ErrNotFound is returned when the target file does not exist (e.g. it was moved
+// or deleted outside the app). Callers can distinguish this from a launch failure
+// (such as no application being associated with the file type) via errors.Is.
+var ErrNotFound = errors.New("file not found")
 
 // Open opens path in the OS default application for its file type.
 func Open(path string) error {
@@ -80,10 +87,18 @@ func dbusShowItemsArgs(path string) []string {
 // set, a non-zero exit code from a process that did run is treated as success
 // (Windows Explorer's /select quirk); a missing binary is still reported.
 func run(name string, args []string, ignoreExit bool) error {
-	if err := exec.Command(name, args...).Run(); err != nil {
+	cmd := exec.Command(name, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if ignoreExit && errors.As(err, &exitErr) {
 			return nil // the process ran; only its exit code was non-zero
+		}
+		// Surface the launcher's own message (e.g. macOS open's "no application
+		// knows how to open") when it gave one — far more useful than "exit 1".
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return fmt.Errorf("desktop: %s: %s", name, msg)
 		}
 		return fmt.Errorf("desktop: %s: %w", name, err)
 	}
@@ -92,10 +107,10 @@ func run(name string, args []string, ignoreExit bool) error {
 
 func checkExists(path string) error {
 	if path == "" {
-		return fmt.Errorf("desktop: empty path")
+		return fmt.Errorf("%w: empty path", ErrNotFound)
 	}
 	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("desktop: file unavailable: %w", err)
+		return fmt.Errorf("%w: %v", ErrNotFound, err)
 	}
 	return nil
 }

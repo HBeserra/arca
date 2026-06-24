@@ -352,7 +352,15 @@ func (s *CatalogService) OpenDesignFile(id string) error {
 	if err != nil {
 		return err
 	}
-	return desktop.Open(path)
+	if err := desktop.Open(path); err != nil {
+		if errors.Is(err, desktop.ErrNotFound) {
+			return fmt.Errorf("o arquivo não está mais no lugar (movido ou removido fora do app)")
+		}
+		// The file exists but the OS could not open it — almost always because no
+		// program is associated with this embroidery format.
+		return fmt.Errorf("não foi possível abrir: talvez nenhum programa esteja associado a arquivos %s neste computador. Use \"Mostrar na pasta\" e abra com o seu software de bordado", strings.ToLower(filepath.Ext(path)))
+	}
+	return nil
 }
 
 // RevealDesignFile shows a design's source file in the system file manager
@@ -362,7 +370,13 @@ func (s *CatalogService) RevealDesignFile(id string) error {
 	if err != nil {
 		return err
 	}
-	return desktop.Reveal(path)
+	if err := desktop.Reveal(path); err != nil {
+		if errors.Is(err, desktop.ErrNotFound) {
+			return fmt.Errorf("o arquivo não está mais no lugar (movido ou removido fora do app)")
+		}
+		return fmt.Errorf("não foi possível abrir o gerenciador de arquivos")
+	}
+	return nil
 }
 
 // designPath resolves a design id to its absolute source path.
