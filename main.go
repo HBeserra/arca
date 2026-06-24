@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 
@@ -86,6 +87,20 @@ func main() {
 	mlEng := ml.New(logger, mlOpts...)
 	eng := catalog.New(logger, reader, render.New(), store, thumbs, catalog.WithClassifier(mlEng))
 	catSvc := services.NewCatalogService(eng, appIcon)
+
+	// Consolidate any catalogued originals still living outside ~/.stitchvault
+	// (e.g. on a USB drive) into it, so the catalogue is self-contained. Runs once
+	// in the background; idempotent and non-destructive (sources are only copied,
+	// never deleted; unreachable sources are skipped).
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		if copied, skipped, err := eng.ConsolidateOriginals(ctx); err != nil {
+			logger.Warn("consolidate originals", "err", err)
+		} else if copied > 0 || skipped > 0 {
+			logger.Info("consolidated originals into ~/.stitchvault/originals", "copied", copied, "skipped", skipped)
+		}
+	}()
 
 	app := application.New(application.Options{
 		Name:        "StitchVault",

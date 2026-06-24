@@ -44,13 +44,13 @@ type Design struct {
 // Filter selects and pages designs for the gallery. Zero-valued bounds mean "no
 // bound on that axis"; an empty Formats slice means "any format".
 type Filter struct {
-	Formats     []string
-	MinSizeMM   float64 // filter on the larger of width/height (the design's "size")
-	MaxSizeMM   float64
-	MinStitches int
-	MaxStitches int
-	MinColors   int
-	MaxColors   int
+	Formats         []string
+	MinSizeMM       float64 // filter on the larger of width/height (the design's "size")
+	MaxSizeMM       float64
+	MinStitches     int
+	MaxStitches     int
+	MinColors       int
+	MaxColors       int
 	Search          string // case-insensitive substring of the file name
 	VirtualFolderID string // restrict to one LLM-generated folder; "" = any
 	DuplicatesOnly  bool   // only designs whose content signature appears 2+ times
@@ -98,6 +98,7 @@ type Store interface {
 	ListDesigns(ctx context.Context, f Filter) ([]Design, error)
 	CountDesigns(ctx context.Context, f Filter) (int, error)
 	GetDesign(ctx context.Context, id uuid.UUID) (Design, error)
+	UpdatePath(ctx context.Context, id uuid.UUID, path string) error
 	Facets(ctx context.Context) (Facets, error)
 
 	// Phase 2.

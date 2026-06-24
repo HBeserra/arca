@@ -33,11 +33,11 @@ func newStore(t *testing.T) *catalogdb.Store {
 
 func rose() catalog.Design {
 	return catalog.Design{
-		ID:           catalog.DesignID("/a/rose.pes"),
-		Path:         "/a/rose.pes",
-		FileName:     "rose.pes",
-		Format:       ".pes",
-		WidthMM:      30, HeightMM: 10,
+		ID:       catalog.DesignID("/a/rose.pes"),
+		Path:     "/a/rose.pes",
+		FileName: "rose.pes",
+		Format:   ".pes",
+		WidthMM:  30, HeightMM: 10,
 		StitchCount: 100, ColorChanges: 1, ColorCount: 2,
 		Palette:       []embroidery.Thread{{R: 255, Description: "Red"}, {G: 255, Description: "Green"}},
 		ThumbnailPath: "/thumbs/rose.png",
@@ -48,11 +48,11 @@ func rose() catalog.Design {
 
 func lion() catalog.Design {
 	return catalog.Design{
-		ID:           catalog.DesignID("/b/lion.dst"),
-		Path:         "/b/lion.dst",
-		FileName:     "lion.dst",
-		Format:       ".dst",
-		WidthMM:      80, HeightMM: 60,
+		ID:       catalog.DesignID("/b/lion.dst"),
+		Path:     "/b/lion.dst",
+		FileName: "lion.dst",
+		Format:   ".dst",
+		WidthMM:  80, HeightMM: 60,
 		StitchCount: 5000, ColorChanges: 0, ColorCount: 1,
 		Palette:       nil, // DST carries no colours
 		ThumbnailPath: "/thumbs/lion.png",

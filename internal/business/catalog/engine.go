@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"os"
@@ -144,7 +145,7 @@ func (e *Engine) Prepare(ctx context.Context, path string) (Design, error) {
 	}
 
 	w, h := des.SizeMM()
-	return Design{
+	d := Design{
 		ID:            id,
 		Path:          abs,
 		FileName:      filepath.Base(abs),
@@ -158,7 +159,99 @@ func (e *Engine) Prepare(ctx context.Context, path string) (Design, error) {
 		ThumbnailPath: thumbPath,
 		FileSize:      fileSize,
 		CreatedAt:     time.Now(),
-	}, nil
+	}
+
+	// Copy the original into ~/.stitchvault/originals so the catalogue is
+	// self-contained — it keeps working when the source USB/folder is gone, and
+	// "open file"/"reveal" always resolve. Best-effort: on failure keep the source
+	// path. The source is never deleted.
+	if stored, cerr := e.storeOriginal(abs, id, filepath.Ext(abs)); cerr != nil {
+		e.log.Warn("catalog: copy original failed; keeping source path", "file", filepath.Base(abs), "err", cerr)
+	} else {
+		d.Path = stored
+	}
+	return d, nil
+}
+
+// storeOriginal copies src into the originals dir as <id><ext> and returns the new
+// path. If src already lives under the originals dir it is returned unchanged (so
+// re-imports and ConsolidateOriginals are idempotent). The source is never removed.
+func (e *Engine) storeOriginal(src string, id uuid.UUID, ext string) (string, error) {
+	dir := e.originalsDir()
+	src = filepath.Clean(src)
+	if rel, err := filepath.Rel(dir, src); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return src, nil // already inside the originals dir
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	dst := filepath.Join(dir, id.String()+strings.ToLower(ext))
+	if err := copyFileContents(src, dst); err != nil {
+		return "", err
+	}
+	return dst, nil
+}
+
+// copyFileContents copies src to dst via a temp file + rename so a partial copy is
+// never left at dst.
+func copyFileContents(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	tmp := dst + ".tmp"
+	out, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, dst)
+}
+
+// ConsolidateOriginals copies every catalogued design whose source file is still
+// accessible and not yet under the originals dir into ~/.stitchvault/originals,
+// rewriting its stored path. Sources that can't be read (a removed USB drive, a
+// deleted file) are skipped, never erroring the whole pass. It is idempotent and
+// never deletes a source, so it is safe to run on every startup.
+func (e *Engine) ConsolidateOriginals(ctx context.Context) (copied, skipped int, err error) {
+	designs, err := e.store.ListDesigns(ctx, Filter{Limit: 1 << 30})
+	if err != nil {
+		return 0, 0, fmt.Errorf("consolidate: list: %w", err)
+	}
+	for _, d := range designs {
+		if err := ctx.Err(); err != nil {
+			return copied, skipped, err
+		}
+		if d.Path == "" {
+			skipped++
+			continue
+		}
+		stored, serr := e.storeOriginal(d.Path, d.ID, filepath.Ext(d.Path))
+		if serr != nil {
+			skipped++ // source missing/unreadable — leave the row pointing at it
+			continue
+		}
+		if stored == d.Path {
+			continue // already under originals
+		}
+		if uerr := e.store.UpdatePath(ctx, d.ID, stored); uerr != nil {
+			e.log.Warn("catalog: consolidate: update path failed", "id", d.ID, "err", uerr)
+			skipped++
+			continue
+		}
+		copied++
+	}
+	return copied, skipped, nil
 }
 
 // Save persists a prepared design. Call it from a single goroutine to keep DuckDB

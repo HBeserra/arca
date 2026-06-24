@@ -380,6 +380,17 @@ func (s *Store) CreateVirtualFolder(ctx context.Context, id uuid.UUID, name stri
 	return nil
 }
 
+// UpdatePath rewrites a design's stored source path (used when originals are
+// consolidated into ~/.stitchvault/originals).
+func (s *Store) UpdatePath(ctx context.Context, id uuid.UUID, path string) error {
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE designs SET path = $2 WHERE id = $1`,
+		id.String(), path); err != nil {
+		return fmt.Errorf("update path: %w", err)
+	}
+	return nil
+}
+
 // AssignFolder sets a design's virtual folder.
 func (s *Store) AssignFolder(ctx context.Context, designID, folderID uuid.UUID) error {
 	_, err := s.db.ExecContext(ctx,

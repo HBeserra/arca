@@ -55,9 +55,11 @@ type bundleData struct {
 	Settings map[string]string `json:"settings"`
 }
 
-// importedDir is where Import extracts original files (sibling of thumbnails).
-func (e *Engine) importedDir() string {
-	return filepath.Join(filepath.Dir(e.thumbDir), "imported")
+// originalsDir is where imported original files live inside ~/.stitchvault (a
+// sibling of the thumbnails dir). Reused by both the normal import (which copies
+// the source file in) and the .svault bundle import (which extracts it).
+func (e *Engine) originalsDir() string {
+	return filepath.Join(filepath.Dir(e.thumbDir), "originals")
 }
 
 // Export writes the whole catalog as a .svault bundle to w. progress(done,total)
@@ -143,8 +145,8 @@ func (e *Engine) Import(ctx context.Context, r io.ReaderAt, size int64, progress
 		}
 	}
 
-	imported := e.importedDir()
-	if err := os.MkdirAll(imported, 0o755); err != nil {
+	originals := e.originalsDir()
+	if err := os.MkdirAll(originals, 0o755); err != nil {
 		return fmt.Errorf("import: mkdir: %w", err)
 	}
 
@@ -161,7 +163,7 @@ func (e *Engine) Import(ctx context.Context, r io.ReaderAt, size int64, progress
 			}
 		}
 		if bd.HasFile {
-			dst := filepath.Join(imported, d.ID.String()+bd.FileExt)
+			dst := filepath.Join(originals, d.ID.String()+bd.FileExt)
 			if extractZipFile(files, "designs/"+d.ID.String()+bd.FileExt, dst, 0o644) == nil {
 				d.Path = dst
 			}
