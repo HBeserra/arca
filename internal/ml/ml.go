@@ -57,7 +57,7 @@ func ensureProcessorEnv() {
 
 // Defaults — override via options.
 const (
-	DefaultEmbedModel = "ggml-org/embeddinggemma-300m-qat-q8_0-GGUF/embeddinggemma-300m-qat-Q8_0.gguf"
+	DefaultEmbedModel = "https://huggingface.co/ggml-org/embeddinggemma-300m-qat-q8_0-GGUF/resolve/main/embeddinggemma-300m-qat-Q8_0.gguf"
 	// Vision model presets (full HuggingFace URLs — the reliable source form that
 	// triggers a direct download with automatic mmproj sibling discovery). Both are
 	// verified to LOAD in the current Kronk/llama.cpp build. SmolVLM2 was dropped:
@@ -482,8 +482,7 @@ func (e *Engine) EnsureVision(ctx context.Context) error {
 			// a single prefill pass. A low n_ubatch forces multiple passes per image
 			// and "significantly slows inference"; match n_batch to it. Safe on Apple
 			// Silicon's unified memory.
-			model.WithNBatch(2048),
-			model.WithNUBatch(2048),
+			model.WithPrefillBatchSize(2048),
 		}
 		// Classification needs little context (~image + short prompt + short JSON),
 		// so a small window keeps the KV cache and graph reserve light. Parallel
