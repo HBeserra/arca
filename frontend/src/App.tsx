@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Events } from "@wailsio/runtime";
-import { X, Trash2 } from "lucide-react";
+import { X, Trash2, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toolbar } from "@/components/Toolbar";
@@ -24,6 +24,7 @@ import type {
   FoldersErrorPayload,
   VisionModelInfo,
   CaptionLanguageInfo,
+  WorkerModeInfo,
   ExportProgressPayload,
   ExportErrorPayload,
   RestoreProgressPayload,
@@ -35,6 +36,11 @@ interface ImportState {
   active: boolean;
   done: number;
   total: number;
+}
+
+interface UIError {
+  kind: "import" | "classify" | "folder" | "export" | "restore" | "general";
+  text: string;
 }
 
 // Pagination: the gallery loads designs in pages (infinite scroll) so a 10k+
@@ -50,13 +56,14 @@ export default function App() {
   const [filter, setFilter] = useState<ListFilter>(emptyFilter);
   const [selected, setSelected] = useState<DesignInfo | null>(null);
   const [imp, setImp] = useState<ImportState>({ active: false, done: 0, total: 0 });
-  const [errors, setErrors] = useState<string[]>([]);
+  const [errors, setErrors] = useState<UIError[]>([]);
   const [classifyStatus, setClassifyStatus] = useState<ClassifyStatus | null>(null);
   const [classifying, setClassifying] = useState<ImportState>({ active: false, done: 0, total: 0 });
   const [folders, setFolders] = useState<FolderInfo[]>([]);
   const [generatingFolders, setGeneratingFolders] = useState(false);
   const [visionInfo, setVisionInfo] = useState<VisionModelInfo | null>(null);
   const [captionInfo, setCaptionInfo] = useState<CaptionLanguageInfo | null>(null);
+  const [workerInfo, setWorkerInfo] = useState<WorkerModeInfo | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [resetToken, setResetToken] = useState(0); // bump to scroll the gallery to top
   const [catalogIO, setCatalogIO] = useState<{ kind: "export" | "restore" | null; done: number; total: number }>({
@@ -149,6 +156,21 @@ export default function App() {
     });
   }, []);
 
+  const refreshWorkerModes = useCallback(() => {
+    CatalogService.WorkerModes().then((w) => {
+      if (w) setWorkerInfo(w as unknown as WorkerModeInfo);
+    });
+  }, []);
+
+  const handleSetWorkerMode = useCallback(
+    (id: string) => {
+      CatalogService.SetWorkerMode(id).then(() => {
+        refreshWorkerModes();
+      });
+    },
+    [refreshWorkerModes],
+  );
+
   // Facets, classify status, folders, models once on mount.
   useEffect(() => {
     refreshFacets();
@@ -156,7 +178,8 @@ export default function App() {
     refreshFolders();
     refreshVisionModels();
     refreshCaptionLanguages();
-  }, [refreshFacets, refreshClassifyStatus, refreshFolders, refreshVisionModels, refreshCaptionLanguages]);
+    refreshWorkerModes();
+  }, [refreshFacets, refreshClassifyStatus, refreshFolders, refreshVisionModels, refreshCaptionLanguages, refreshWorkerModes]);
 
   // Reload page 0 and scroll to top whenever the filter changes (and on mount).
   useEffect(() => {
@@ -186,7 +209,7 @@ export default function App() {
       setImp({ active: true, done: e.data.done, total: e.data.total });
     });
     const offError = Events.On("import:error", (e: { data: ImportErrorPayload }) => {
-      setErrors((prev) => [...prev.slice(-19), `${e.data.fileName}: ${e.data.error}`]);
+      setErrors((prev) => [...prev.slice(-19), { kind: "import", text: `${e.data.fileName}: ${e.data.error}` }]);
     });
     const offComplete = Events.On("import:complete", (e: { data: ImportCompletePayload }) => {
       setImp({ active: false, done: e.data.total, total: e.data.total });
@@ -199,7 +222,7 @@ export default function App() {
       setClassifying({ active: true, done: e.data.done, total: e.data.total });
     });
     const offCError = Events.On("classify:error", (e: { data: ClassifyErrorPayload }) => {
-      setErrors((prev) => [...prev.slice(-19), `${e.data.fileName}: ${e.data.error}`]);
+      setErrors((prev) => [...prev.slice(-19), { kind: "classify", text: `${e.data.fileName}: ${e.data.error}` }]);
     });
     const offCComplete = Events.On("classify:complete", (e: { data: ClassifyCompletePayload }) => {
       setClassifying({ active: false, done: e.data.total, total: e.data.total });
@@ -214,7 +237,7 @@ export default function App() {
     });
     const offFError = Events.On("folders:error", (e: { data: FoldersErrorPayload }) => {
       setGeneratingFolders(false);
-      setErrors((prev) => [...prev.slice(-19), `pastas: ${e.data.error}`]);
+      setErrors((prev) => [...prev.slice(-19), { kind: "folder", text: `pastas: ${e.data.error}` }]);
     });
 
     const offExportProgress = Events.On("export:progress", (e: { data: ExportProgressPayload }) => {
@@ -225,7 +248,7 @@ export default function App() {
     });
     const offExportError = Events.On("export:error", (e: { data: ExportErrorPayload }) => {
       setCatalogIO({ kind: null, done: 0, total: 0 });
-      setErrors((prev) => [...prev.slice(-19), `exportar: ${e.data.error}`]);
+      setErrors((prev) => [...prev.slice(-19), { kind: "export", text: `exportar: ${e.data.error}` }]);
     });
     const offRestoreProgress = Events.On("restore:progress", (e: { data: RestoreProgressPayload }) => {
       setCatalogIO({ kind: "restore", done: e.data.done, total: e.data.total });
@@ -239,7 +262,7 @@ export default function App() {
     });
     const offRestoreError = Events.On("restore:error", (e: { data: RestoreErrorPayload }) => {
       setCatalogIO({ kind: null, done: 0, total: 0 });
-      setErrors((prev) => [...prev.slice(-19), `importar: ${e.data.error}`]);
+      setErrors((prev) => [...prev.slice(-19), { kind: "restore", text: `importar: ${e.data.error}` }]);
     });
 
     return () => {
@@ -420,6 +443,8 @@ export default function App() {
               onSetVisionModel={handleSetVisionModel}
               captionInfo={captionInfo}
               onSetCaptionLanguage={handleSetCaptionLanguage}
+              workerInfo={workerInfo}
+              onSetWorkerMode={handleSetWorkerMode}
               modelsLoaded={classifyStatus?.loaded ?? false}
               onEjectModels={handleEjectModels}
               aiBusy={classifying.active || generatingFolders}
@@ -444,19 +469,45 @@ export default function App() {
           </div>
         </div>
 
-        {errors.length > 0 && (
-          <div className="flex items-start gap-2 border-t bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            <div className="flex-1 space-y-0.5 max-h-20 overflow-auto">
-              <p className="font-medium">{errors.length} arquivo(s) falharam ao importar:</p>
-              {errors.map((e, i) => (
-                <p key={i} className="font-mono opacity-80 truncate">{e}</p>
-              ))}
+        {errors.length > 0 && (() => {
+          const hasClassifyErrors = errors.some((e) => e.kind === "classify");
+          const allClassify = errors.every((e) => e.kind === "classify");
+          const allImport = errors.every((e) => e.kind === "import");
+
+          let title = `${errors.length} erro(s) encontrados:`;
+          if (allClassify) {
+            title = `${errors.length} bordado(s) falharam ao classificar:`;
+          } else if (allImport) {
+            title = `${errors.length} arquivo(s) falharam ao importar:`;
+          }
+
+          return (
+            <div className="flex items-start gap-2 border-t bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              <div className="flex-1 space-y-0.5 max-h-20 overflow-auto">
+                <p className="font-medium">{title}</p>
+                {errors.map((e, i) => (
+                  <p key={i} className="font-mono opacity-80 truncate">{e.text}</p>
+                ))}
+              </div>
+              {hasClassifyErrors && !classifying.active && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 text-xs gap-1 border-destructive/40 text-destructive hover:bg-destructive/10 self-center"
+                  onClick={() => {
+                    setErrors((prev) => prev.filter((e) => e.kind !== "classify"));
+                    handleClassifyAll();
+                  }}
+                >
+                  <RotateCw className="h-3 w-3" /> Tentar novamente
+                </Button>
+              )}
+              <button onClick={() => setErrors([])} className="opacity-70 hover:opacity-100 self-center">
+                <X className="h-4 w-4" />
+              </button>
             </div>
-            <button onClick={() => setErrors([])} className="opacity-70 hover:opacity-100">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        )}
+          );
+        })()}
 
         <DesignDetailDialog
           design={selected}

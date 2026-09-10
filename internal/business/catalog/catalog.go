@@ -38,6 +38,7 @@ type Design struct {
 	Caption         string
 	Tags            []string
 	Style           string
+	Rotate          string // "0", "90", "180", "270"
 	VirtualFolderID *uuid.UUID
 }
 
@@ -102,7 +103,7 @@ type Store interface {
 	Facets(ctx context.Context) (Facets, error)
 
 	// Phase 2.
-	UpdateClassification(ctx context.Context, id uuid.UUID, caption string, tags []string, style string, embedding []float32) error
+	UpdateClassification(ctx context.Context, id uuid.UUID, caption string, tags []string, style string, rotate string, embedding []float32) error
 	SearchSimilar(ctx context.Context, queryVec []float32, f Filter) ([]Design, error)
 
 	// Virtual folders.
@@ -126,6 +127,8 @@ type Classifier interface {
 	Embed(ctx context.Context, text string) ([]float32, error)
 	Complete(ctx context.Context, prompt string, schema map[string]any) (string, error)
 	Concurrency() int
+	SetConcurrency(ctx context.Context, n int)
+	Warmup(ctx context.Context) error
 
 	VisionModel() string
 	SetVisionModel(url string)

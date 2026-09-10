@@ -95,9 +95,9 @@ type CaptionLang struct {
 // CaptionLanguagePresets returns the selectable caption/tags languages.
 func CaptionLanguagePresets() []CaptionLang {
 	return []CaptionLang{
-		{Code: "pt", Label: "Português", instruction: `IMPORTANTE: escreva a "caption" e cada item de "tags" em PORTUGUÊS do Brasil. Nunca use inglês. Vá direto ao assunto: NÃO comece com "bordado", "desenho de bordado" nem "a imagem mostra", e não inclua dimensões (ex.: "Menina de touca e vestido", não "Bordado de uma menina…"). Nas tags não use "bordado" nem "desenho".`},
-		{Code: "en", Label: "English", instruction: `Write the "caption" and every "tags" entry in English. Name the subject directly: do NOT start with "a machine-embroidery design" and do not mention embroidery or dimensions (e.g. "Child in a bonnet and dress", not "A machine-embroidery design of a child…"). In tags never use "embroidery" or "design".`},
-		{Code: "es", Label: "Español", instruction: `IMPORTANTE: escribe la "caption" y cada elemento de "tags" en ESPAÑOL. Nunca uses inglés. Nombra el sujeto directamente: NO empieces con "bordado" ni "diseño de bordado", y no incluyas dimensiones (p. ej. "Niña con gorro y vestido", no "Diseño de bordado de una niña…"). En las tags no uses "bordado" ni "diseño".`},
+		{Code: "pt", Label: "Português", instruction: `IMPORTANTE: escreva a "caption" e cada item de "tags" em PORTUGUÊS do Brasil. Nunca use inglês. Vá direto ao assunto: NÃO comece com "bordado", "desenho de bordado" nem "a imagem mostra", e não inclua dimensões (ex.: "Menina de touca e vestido", não "Bordado de uma menina…"). Nas tags não use "bordado" nem "desenho". Para "rotate", verifique com Atenção o texto, letras, logos e rostos: se o texto/desenho estiver girado de lado ou de ponta-cabeça, defina "rotate" como "90", "180" ou "270" com os graus no sentido horário necessários para a imagem ficar de pé/legível; use "0" se já estiver de pé.`},
+		{Code: "en", Label: "English", instruction: `Write the "caption" and every "tags" entry in English. Name the subject directly: do NOT start with "a machine-embroidery design" and do not mention embroidery or dimensions (e.g. "Child in a bonnet and dress", not "A machine-embroidery design of a child…"). In tags never use "embroidery" or "design". For "rotate", inspect any text, letters, logos or faces: output "90", "180", or "270" clockwise degrees to make it read upright, or "0" if already upright.`},
+		{Code: "es", Label: "Español", instruction: `IMPORTANTE: escribe la "caption" y cada elemento de "tags" en ESPAÑOL. Nunca uses inglés. Nombra el sujeto directamente: NO empieces con "bordado" ni "diseño de bordado", y no incluyas dimensiones (p. ej. "Niña con gorro y vestido", no "Diseño de bordado de una niña…"). En las tags no uses "bordado" ni "diseño". Para "rotate", revisa texto, letras, logos o caras: responde "90", "180" o "270" según los grados en sentido horario necesarios para poner la imagen recta, o "0" si ya está recta.`},
 	}
 }
 
@@ -265,9 +265,6 @@ func WithConcurrency(n int) Option {
 	}
 }
 
-// Concurrency reports the configured parallel-inference width.
-func (e *Engine) Concurrency() int { return e.concurrency }
-
 // WithClassifyPx overrides the classification image edge (px).
 func WithClassifyPx(n int) Option {
 	return func(e *Engine) {
@@ -304,17 +301,71 @@ func (e *Engine) SetCaptionLanguage(code string) {
 	e.captionLang = code
 }
 
-// defaultConcurrency picks the parallel-inference width. Default is 1 (serial):
-// benchmarked on Apple Silicon, a single 3B vision inference already saturates the
-// GPU, so NSeqMax>1 only adds VRAM contention and is *slower*. Power users with a
-// bigger GPU can opt in via $STITCHVAULT_AI_WORKERS.
+// AutoWorkers picks the optimal default worker concurrency based on host hardware.
+func AutoWorkers() int {
+	if v := os.Getenv("STITCHVAULT_AI_WORKERS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	// On Apple Silicon, 2 workers effectively batches token decodes
+	// while keeping thermals balanced on fanless MacBook Airs.
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		return 2
+	}
+	return 1
+}
+
+// defaultConcurrency picks the initial parallel-inference width.
 func defaultConcurrency() int {
 	if v := os.Getenv("STITCHVAULT_AI_WORKERS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
 		}
 	}
-	return 1
+	return AutoWorkers()
+}
+
+// SetConcurrency updates the parallel inference worker count.
+// If the vision model is currently loaded with a different concurrency level,
+// it is unloaded so it re-initializes with the matching NSeqMax context partition.
+func (e *Engine) SetConcurrency(ctx context.Context, n int) {
+	if n < 1 {
+		n = 1
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.concurrency == n {
+		return
+	}
+	e.concurrency = n
+	if e.krnVision != nil {
+		_ = e.krnVision.Unload(ctx)
+		e.krnVision = nil
+		e.loadedVision = ""
+	}
+}
+
+// Concurrency returns the active worker count for parallel inference.
+func (e *Engine) Concurrency() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.concurrency < 1 {
+		return 1
+	}
+	return e.concurrency
+}
+
+// Warmup ensures that both the vision model and embedding model are loaded
+// and ready for inference before batch processing begins.
+func (e *Engine) Warmup(ctx context.Context) error {
+	if err := e.EnsureVision(ctx); err != nil {
+		return fmt.Errorf("warmup vision model: %w", err)
+	}
+	if err := e.EnsureEmbed(ctx); err != nil {
+		return fmt.Errorf("warmup embedding model: %w", err)
+	}
+	return nil
 }
 
 // classifyPxFromEnv picks the classification image edge, overridable via
@@ -489,7 +540,7 @@ func (e *Engine) EnsureVision(ctx context.Context) error {
 		// slots (opt-in) need their own KV partitions and a bigger shared context.
 		ctxWindow := 4096
 		if e.concurrency > 1 {
-			ctxWindow = 8 * 1024
+			ctxWindow = max(8*1024, e.concurrency*4096)
 			opts = append(opts,
 				model.WithNSeqMax(e.concurrency),
 				model.WithIncrementalCache(false),

@@ -52,15 +52,11 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	// Catalog and RAG share the one DuckDB file; the slice only touches catalogdb.
-	db, err := sql.Open("duckdb", dbPath())
-	if err != nil {
-		log.Fatalf("open duckdb: %v", err)
-	}
-
-	store, err := catalogdb.New(logger, db)
+	store, db, err := openCatalogStore(logger, dbPath())
 	if err != nil {
 		log.Fatalf("catalogdb init: %v", err)
 	}
+	defer db.Close()
 
 	// Native Go embroidery reader — no Python, no external process, no bootstrap.
 	// Parses the common machine formats directly (see internal/ingest/goreader).
@@ -82,6 +78,17 @@ func main() {
 
 		if lang, _ := store.GetSetting(ctx, "caption_language"); lang != "" {
 			mlOpts = append(mlOpts, ml.WithCaptionLanguage(lang))
+		}
+
+		if mode, _ := store.GetSetting(ctx, "ai_worker_mode"); mode != "" {
+			switch mode {
+			case catalog.WorkerModeEco:
+				mlOpts = append(mlOpts, ml.WithConcurrency(1))
+			case catalog.WorkerModeTurbo:
+				mlOpts = append(mlOpts, ml.WithConcurrency(3))
+			case catalog.WorkerModeAuto:
+				mlOpts = append(mlOpts, ml.WithConcurrency(ml.AutoWorkers()))
+			}
 		}
 	}
 	mlEng := ml.New(logger, mlOpts...)
@@ -131,6 +138,50 @@ func main() {
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func openCatalogStore(logger *slog.Logger, path string) (*catalogdb.Store, *sql.DB, error) {
+	db, err := sql.Open("duckdb", path)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	store, err := catalogdb.New(logger, db)
+	if err == nil {
+		return store, db, nil
+	}
+	db.Close()
+
+	if !isDuckDBWALReplayError(err) {
+		return nil, nil, err
+	}
+
+	walPath := path + ".wal"
+	if _, statErr := os.Stat(walPath); statErr != nil {
+		return nil, nil, err
+	}
+	recoveryPath := fmt.Sprintf("%s.recovery-%s", walPath, time.Now().UTC().Format("20060102T150405.000000000Z"))
+	if renameErr := os.Rename(walPath, recoveryPath); renameErr != nil {
+		return nil, nil, fmt.Errorf("%w (preserve WAL %q: %v)", err, recoveryPath, renameErr)
+	}
+
+	logger.Warn("DuckDB WAL replay failed; preserved WAL and retrying database", "wal", recoveryPath, "err", err)
+	db, openErr := sql.Open("duckdb", path)
+	if openErr != nil {
+		return nil, nil, openErr
+	}
+	store, retryErr := catalogdb.New(logger, db)
+	if retryErr != nil {
+		db.Close()
+		return nil, nil, fmt.Errorf("after WAL recovery: %w", retryErr)
+	}
+	return store, db, nil
+}
+
+func isDuckDBWALReplayError(err error) bool {
+	message := err.Error()
+	return strings.Contains(message, "Failure while replaying WAL") ||
+		strings.Contains(message, "GetDefaultDatabase with no default database set")
 }
 
 // thumbMiddleware serves rendered thumbnails from dir at /thumb/<id>.png and falls

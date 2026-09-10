@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
-import { Sparkles, Loader2, Trash2, ExternalLink, FolderOpen } from "lucide-react";
+import { Sparkles, Loader2, Trash2, ExternalLink, FolderOpen, RotateCw } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -130,6 +130,14 @@ export function DesignDetailDialog({ design, classifyAvailable, onClose, onClass
                         <p className="text-xs">{design.caption}</p>
                         {design.style && (
                           <p className="text-xs text-muted-foreground">Estilo: {design.style}</p>
+                        )}
+                        {design.rotate && (
+                          <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <RotateCw className="h-3 w-3" /> Orientação: <span className="font-semibold text-foreground">{design.rotate}°</span>
+                            {design.rotate !== "0" && (
+                              <span className="text-[10px] text-emerald-600 font-medium">(girada para melhor visualização)</span>
+                            )}
+                          </p>
                         )}
                         {design.tags.length > 0 && (
                           <div className="flex flex-wrap gap-1">

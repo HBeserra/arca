@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect, useLayoutEffect } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ImageOff, FolderInput, Loader2, Check } from "lucide-react";
+import { ImageOff, FolderInput, Loader2, Check, RotateCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { DesignInfo } from "@/lib/types";
@@ -199,9 +199,16 @@ function DesignCard({
             {design.fileName}
           </p>
           <div className="flex items-center justify-between gap-1">
-            <Badge variant="secondary" className="font-mono text-[10px] uppercase">
-              {design.format.replace(".", "")}
-            </Badge>
+            <div className="flex items-center gap-1">
+              <Badge variant="secondary" className="font-mono text-[10px] uppercase">
+                {design.format.replace(".", "")}
+              </Badge>
+              {design.rotate && design.rotate !== "0" && (
+                <span className="flex items-center gap-0.5 font-mono text-[9px] font-medium text-emerald-600" title={`Giro de ${design.rotate}° aplicado`}>
+                  <RotateCw className="h-2.5 w-2.5" />{design.rotate}°
+                </span>
+              )}
+            </div>
             <span className="text-[10px] tabular-nums text-muted-foreground">
               {Math.round(design.widthMM)}×{Math.round(design.heightMM)} mm
             </span>

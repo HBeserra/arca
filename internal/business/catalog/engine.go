@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -339,6 +340,7 @@ type ClassifyResult struct {
 	Caption   string
 	Tags      []string
 	Style     string
+	Rotate    string
 	Embedding []float32
 }
 
@@ -359,6 +361,8 @@ func (e *Engine) ClassifyData(ctx context.Context, d Design) (ClassifyResult, er
 		return ClassifyResult{}, err
 	}
 
+	rotate := "0"
+
 	// The vision model recognizes faces/animals/letters and reports when the design
 	// is rendered sideways or upside down. Rotate the stored thumbnail so the
 	// preview reads upright, then re-classify the corrected image once for better
@@ -367,12 +371,15 @@ func (e *Engine) ClassifyData(ctx context.Context, d Design) (ClassifyResult, er
 	if deg := rotateDegrees(c.Rotate); deg != 0 {
 		if rotated, rerr := render.RotatePNG(png, deg); rerr != nil {
 			e.log.Warn("catalog: rotate thumbnail failed", "file", d.FileName, "deg", deg, "err", rerr)
-		} else if werr := os.WriteFile(d.ThumbnailPath, rotated, 0o644); werr != nil {
-			e.log.Warn("catalog: persist rotated thumbnail failed", "file", d.FileName, "err", werr)
 		} else {
-			png = rotated
-			if c2, err2 := e.cls.Classify(ctx, png, hint); err2 == nil {
-				c = c2
+			if c2, err2 := e.cls.Classify(ctx, rotated, hint); err2 == nil && rotateDegrees(c2.Rotate) == 0 {
+				if werr := os.WriteFile(d.ThumbnailPath, rotated, 0o644); werr != nil {
+					e.log.Warn("catalog: persist rotated thumbnail failed", "file", d.FileName, "err", werr)
+				} else {
+					png = rotated
+					c = c2
+					rotate = strconv.Itoa(deg)
+				}
 			}
 		}
 	}
@@ -382,13 +389,13 @@ func (e *Engine) ClassifyData(ctx context.Context, d Design) (ClassifyResult, er
 	if err != nil {
 		return ClassifyResult{}, fmt.Errorf("catalog: embed caption: %w", err)
 	}
-	return ClassifyResult{Caption: c.Caption, Tags: tags, Style: c.Style, Embedding: emb}, nil
+	return ClassifyResult{Caption: c.Caption, Tags: tags, Style: c.Style, Rotate: rotate, Embedding: emb}, nil
 }
 
 // SaveClassification persists a ClassifyResult. Call from a single goroutine to
 // keep DuckDB writes serialized.
 func (e *Engine) SaveClassification(ctx context.Context, id uuid.UUID, r ClassifyResult) error {
-	return e.store.UpdateClassification(ctx, id, r.Caption, r.Tags, r.Style, r.Embedding)
+	return e.store.UpdateClassification(ctx, id, r.Caption, r.Tags, r.Style, r.Rotate, r.Embedding)
 }
 
 // Classify classifies one design and persists it, returning the updated design.
@@ -404,7 +411,45 @@ func (e *Engine) Classify(ctx context.Context, id uuid.UUID) (Design, error) {
 	if err := e.SaveClassification(ctx, id, r); err != nil {
 		return Design{}, err
 	}
-	d.Caption, d.Tags, d.Style = r.Caption, r.Tags, r.Style
+	d.Caption, d.Tags, d.Style, d.Rotate = r.Caption, r.Tags, r.Style, r.Rotate
+	return d, nil
+}
+
+// RotateDesign rotates the stored thumbnail of a design clockwise by deg degrees
+// (90, 180, 270) and persists the updated rotation angle in the catalog.
+func (e *Engine) RotateDesign(ctx context.Context, id uuid.UUID, deg int) (Design, error) {
+	d, err := e.store.GetDesign(ctx, id)
+	if err != nil {
+		return Design{}, fmt.Errorf("catalog: get design for rotate: %w", err)
+	}
+
+	png, err := os.ReadFile(d.ThumbnailPath)
+	if err != nil {
+		return Design{}, fmt.Errorf("catalog: read thumbnail: %w", err)
+	}
+
+	deg = ((deg % 360) + 360) % 360
+	if deg == 0 {
+		return d, nil
+	}
+
+	rotated, err := render.RotatePNG(png, deg)
+	if err != nil {
+		return Design{}, fmt.Errorf("catalog: rotate PNG: %w", err)
+	}
+
+	if err := os.WriteFile(d.ThumbnailPath, rotated, 0o644); err != nil {
+		return Design{}, fmt.Errorf("catalog: write rotated thumbnail: %w", err)
+	}
+
+	currentDeg := rotateDegrees(d.Rotate)
+	newDeg := (currentDeg + deg) % 360
+	d.Rotate = strconv.Itoa(newDeg)
+
+	if err := e.store.UpdateClassification(ctx, d.ID, d.Caption, d.Tags, d.Style, d.Rotate, nil); err != nil {
+		e.log.Warn("catalog: update rotation in store failed", "id", id, "err", err)
+	}
+
 	return d, nil
 }
 
@@ -729,6 +774,83 @@ func (e *Engine) SetCaptionLanguage(ctx context.Context, code string) error {
 	}
 	e.cls.SetCaptionLanguage(code)
 	return nil
+}
+
+// Worker mode presets and configuration.
+const (
+	WorkerModeEco   = "eco"
+	WorkerModeAuto  = "auto"
+	WorkerModeTurbo = "turbo"
+)
+
+type WorkerModePreset struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Workers     int    `json:"workers"`
+}
+
+func WorkerModePresets() []WorkerModePreset {
+	autoWorkers := ml.AutoWorkers()
+	return []WorkerModePreset{
+		{
+			ID:          WorkerModeEco,
+			Label:       "Econômico (1 worker)",
+			Description: "Poupa bateria e minimiza aquecimento (1 arquivo por vez)",
+			Workers:     1,
+		},
+		{
+			ID:          WorkerModeAuto,
+			Label:       fmt.Sprintf("Automático (%d workers)", autoWorkers),
+			Description: "Equilíbrio recomendado para o hardware da máquina",
+			Workers:     autoWorkers,
+		},
+		{
+			ID:          WorkerModeTurbo,
+			Label:       "Turbo (3 workers)",
+			Description: "Velocidade máxima com processamento concorrente intensivo",
+			Workers:     3,
+		},
+	}
+}
+
+// WorkerMode returns the current worker mode id ("eco", "auto", "turbo").
+func (e *Engine) WorkerMode(ctx context.Context) string {
+	if mode, err := e.store.GetSetting(ctx, "ai_worker_mode"); err == nil && mode != "" {
+		return mode
+	}
+	return WorkerModeAuto
+}
+
+// SetWorkerMode updates and persists the worker mode.
+func (e *Engine) SetWorkerMode(ctx context.Context, mode string) error {
+	if e.cls == nil {
+		return fmt.Errorf("catalog: worker mode unavailable (no ML engine)")
+	}
+	var workers int
+	switch mode {
+	case WorkerModeEco:
+		workers = 1
+	case WorkerModeTurbo:
+		workers = 3
+	case WorkerModeAuto:
+		workers = ml.AutoWorkers()
+	default:
+		return fmt.Errorf("modo de processamento inválido: %q", mode)
+	}
+	if err := e.store.SetSetting(ctx, "ai_worker_mode", mode); err != nil {
+		return err
+	}
+	e.cls.SetConcurrency(ctx, workers)
+	return nil
+}
+
+// Warmup ensures that ML models are loaded and ready before batch execution.
+func (e *Engine) Warmup(ctx context.Context) error {
+	if e.cls == nil {
+		return nil
+	}
+	return e.cls.Warmup(ctx)
 }
 
 // ModelsLoaded reports whether ML models are currently in memory.

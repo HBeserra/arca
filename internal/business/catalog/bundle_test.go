@@ -63,7 +63,7 @@ func TestBundleRoundTrip(t *testing.T) {
 	}
 	emb := make([]float32, 768)
 	emb[0], emb[767] = 0.5, -0.25
-	if err := srcStore.UpdateClassification(ctx, id, d.Caption, d.Tags, d.Style, emb); err != nil {
+	if err := srcStore.UpdateClassification(ctx, id, d.Caption, d.Tags, d.Style, d.Rotate, emb); err != nil {
 		t.Fatal(err)
 	}
 	fid := catalog.DesignID("/folder/flores")

@@ -455,6 +455,13 @@ export class DesignInfo {
              */
             this["tags"] = [];
         }
+        if (!("rotate" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["rotate"] = "";
+        }
         if (!("virtualFolderID" in $$source)) {
             /**
              * @member
@@ -1229,6 +1236,107 @@ export class VisionModelOption {
     }
 }
 
+/**
+ * WorkerModeInfo represents the concurrency configuration and options.
+ */
+export class WorkerModeInfo {
+    /**
+     * Creates a new WorkerModeInfo instance.
+     * @param {Partial<WorkerModeInfo>} [$$source = {}] - The source object to create the WorkerModeInfo.
+     */
+    constructor($$source = {}) {
+        if (!("currentID" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["currentID"] = "";
+        }
+        if (!("workers" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["workers"] = 0;
+        }
+        if (!("options" in $$source)) {
+            /**
+             * @member
+             * @type {WorkerModeOption[]}
+             */
+            this["options"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new WorkerModeInfo instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {WorkerModeInfo}
+     */
+    static createFrom($$source = {}) {
+        const $$createField2_0 = $$createType10;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("options" in $$parsedSource) {
+            $$parsedSource["options"] = $$createField2_0($$parsedSource["options"]);
+        }
+        return new WorkerModeInfo(/** @type {Partial<WorkerModeInfo>} */($$parsedSource));
+    }
+}
+
+/**
+ * WorkerModeOption is one selectable worker mode preset.
+ */
+export class WorkerModeOption {
+    /**
+     * Creates a new WorkerModeOption instance.
+     * @param {Partial<WorkerModeOption>} [$$source = {}] - The source object to create the WorkerModeOption.
+     */
+    constructor($$source = {}) {
+        if (!("id" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["id"] = "";
+        }
+        if (!("label" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["label"] = "";
+        }
+        if (!("description" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["description"] = "";
+        }
+        if (!("workers" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["workers"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new WorkerModeOption instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {WorkerModeOption}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new WorkerModeOption(/** @type {Partial<WorkerModeOption>} */($$parsedSource));
+    }
+}
+
 // Private type creation functions
 const $$createType0 = CaptionLangOption.createFrom;
 const $$createType1 = $Create.Array($$createType0);
@@ -1239,3 +1347,5 @@ const $$createType5 = FacetCountInfo.createFrom;
 const $$createType6 = $Create.Array($$createType5);
 const $$createType7 = VisionModelOption.createFrom;
 const $$createType8 = $Create.Array($$createType7);
+const $$createType9 = WorkerModeOption.createFrom;
+const $$createType10 = $Create.Array($$createType9);

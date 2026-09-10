@@ -237,6 +237,15 @@ export function SetVisionModel(id) {
 }
 
 /**
+ * SetWorkerMode updates the active worker mode ("eco", "auto", "turbo").
+ * @param {string} id
+ * @returns {$CancellablePromise<void>}
+ */
+export function SetWorkerMode(id) {
+    return $Call.ByID(1840886588, id);
+}
+
+/**
  * StopClassify cancels a running batch classification (no-op if none is running).
  * @returns {$CancellablePromise<void>}
  */
@@ -251,6 +260,16 @@ export function StopClassify() {
 export function VisionModels() {
     return $Call.ByID(2668989021).then(/** @type {($result: any) => any} */(($result) => {
         return $$createType13($result);
+    }));
+}
+
+/**
+ * WorkerModes returns the worker presets and the currently active mode.
+ * @returns {$CancellablePromise<$models.WorkerModeInfo | null>}
+ */
+export function WorkerModes() {
+    return $Call.ByID(3116101751).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType15($result);
     }));
 }
 
@@ -269,3 +288,5 @@ const $$createType10 = $Create.Array($$createType9);
 const $$createType11 = $Create.Array($Create.Any);
 const $$createType12 = $models.VisionModelInfo.createFrom;
 const $$createType13 = $Create.Nullable($$createType12);
+const $$createType14 = $models.WorkerModeInfo.createFrom;
+const $$createType15 = $Create.Nullable($$createType14);

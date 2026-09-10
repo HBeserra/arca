@@ -108,6 +108,7 @@ type DesignInfo struct {
 	Caption         string   `json:"caption"`
 	Style           string   `json:"style"`
 	Tags            []string `json:"tags"`
+	Rotate          string   `json:"rotate"`
 	VirtualFolderID string   `json:"virtualFolderID"`
 }
 
@@ -506,6 +507,22 @@ func (s *CatalogService) runClassify(ctx context.Context, todo []catalog.Design)
 
 	total := len(todo)
 
+	// Ensure models are loaded and verified before launching workers.
+	if err := s.eng.Warmup(ctx); err != nil {
+		if ctx.Err() == nil {
+			application.Get().Event.Emit("classify:error", ClassifyErrorEvent{
+				FileName: "Modelo de IA",
+				Error:    fmt.Sprintf("Falha ao inicializar modelo: %v", err),
+			})
+			application.Get().Event.Emit("classify:complete", ClassifyCompleteEvent{
+				Total:      total,
+				Classified: 0,
+				Failed:     total,
+			})
+		}
+		return
+	}
+
 	workers := s.eng.Concurrency()
 	if workers < 1 {
 		workers = 1
@@ -722,6 +739,45 @@ func (s *CatalogService) SetCaptionLanguage(code string) error {
 	return s.eng.SetCaptionLanguage(context.Background(), code)
 }
 
+// WorkerModeOption is one selectable worker mode preset.
+type WorkerModeOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Workers     int    `json:"workers"`
+}
+
+// WorkerModeInfo represents the concurrency configuration and options.
+type WorkerModeInfo struct {
+	CurrentID string             `json:"currentID"`
+	Workers   int                `json:"workers"`
+	Options   []WorkerModeOption `json:"options"`
+}
+
+// WorkerModes returns the worker presets and the currently active mode.
+func (s *CatalogService) WorkerModes() (*WorkerModeInfo, error) {
+	ctx := context.Background()
+	currentID := s.eng.WorkerMode(ctx)
+	info := &WorkerModeInfo{
+		CurrentID: currentID,
+		Workers:   s.eng.Concurrency(),
+	}
+	for _, p := range catalog.WorkerModePresets() {
+		info.Options = append(info.Options, WorkerModeOption{
+			ID:          p.ID,
+			Label:       p.Label,
+			Description: p.Description,
+			Workers:     p.Workers,
+		})
+	}
+	return info, nil
+}
+
+// SetWorkerMode updates the active worker mode ("eco", "auto", "turbo").
+func (s *CatalogService) SetWorkerMode(id string) error {
+	return s.eng.SetWorkerMode(context.Background(), id)
+}
+
 // ─── catalog export / import (.svault portable bundle) ───────────────────────
 
 const svaultExt = ".svault"
@@ -896,6 +952,7 @@ func designToInfo(d catalog.Design) DesignInfo {
 		Caption:         d.Caption,
 		Style:           d.Style,
 		Tags:            tags,
+		Rotate:          d.Rotate,
 		VirtualFolderID: vfid,
 	}
 }

@@ -56,9 +56,12 @@ func (s *Store) init() error {
 			caption           VARCHAR,
 			tags              JSON      DEFAULT '[]',
 			style             VARCHAR,
+			rotate            VARCHAR   DEFAULT '0',
 			embedding         FLOAT[768],
 			virtual_folder_id TEXT
 		);`,
+		// Migration for existing databases
+		`ALTER TABLE designs ADD COLUMN IF NOT EXISTS rotate VARCHAR DEFAULT '0';`,
 		// Self-referential tree, mirrors documents.parent_id so the existing
 		// DocTree frontend component renders it unchanged. Populated in Phase 2.
 		`CREATE TABLE IF NOT EXISTS virtual_folders (
@@ -102,11 +105,11 @@ func (s *Store) InsertDesign(ctx context.Context, d catalog.Design) error {
 		`INSERT OR REPLACE INTO designs
 			(id, path, file_name, format, width_mm, height_mm, stitch_count,
 			 color_changes, color_count, palette, thumbnail_path, file_size_bytes,
-			 created_at, caption, tags, style, virtual_folder_id)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+			 created_at, caption, tags, style, rotate, virtual_folder_id)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
 		m.ID, m.Path, m.FileName, m.Format, m.WidthMM, m.HeightMM, m.StitchCount,
 		m.ColorChanges, m.ColorCount, m.Palette, m.ThumbnailPath, m.FileSize,
-		m.CreatedAt, m.Caption, m.Tags, m.Style, m.VirtualFolderID,
+		m.CreatedAt, m.Caption, m.Tags, m.Style, m.Rotate, m.VirtualFolderID,
 	)
 	if err != nil {
 		return fmt.Errorf("insert design: %w", err)
@@ -143,7 +146,7 @@ func (s *Store) DeleteDesigns(ctx context.Context, ids []uuid.UUID) error {
 
 const designColumns = `id, path, file_name, format, width_mm, height_mm,
 	stitch_count, color_changes, color_count, palette, thumbnail_path,
-	file_size_bytes, created_at, caption, tags, style, virtual_folder_id`
+	file_size_bytes, created_at, caption, tags, style, rotate, virtual_folder_id`
 
 func (s *Store) ListDesigns(ctx context.Context, f catalog.Filter) ([]catalog.Design, error) {
 	where, args := buildWhere(f)
@@ -235,13 +238,17 @@ func (s *Store) Facets(ctx context.Context) (catalog.Facets, error) {
 
 // UpdateClassification stores the Phase-2 semantic attributes and the caption
 // embedding for a design. A nil/empty embedding leaves that column untouched-NULL.
-func (s *Store) UpdateClassification(ctx context.Context, id uuid.UUID, caption string, tags []string, style string, embedding []float32) error {
+func (s *Store) UpdateClassification(ctx context.Context, id uuid.UUID, caption string, tags []string, style string, rotate string, embedding []float32) error {
 	if tags == nil {
 		tags = []string{}
 	}
 	tb, err := json.Marshal(tags)
 	if err != nil {
 		return fmt.Errorf("update classification: marshal tags: %w", err)
+	}
+
+	if rotate == "" {
+		rotate = "0"
 	}
 
 	var captionV, styleV any
@@ -254,14 +261,14 @@ func (s *Store) UpdateClassification(ctx context.Context, id uuid.UUID, caption 
 
 	if len(embedding) == 0 {
 		_, err = s.db.ExecContext(ctx,
-			`UPDATE designs SET caption=$2, tags=$3, style=$4 WHERE id=$1`,
-			id.String(), captionV, string(tb), styleV)
+			`UPDATE designs SET caption=$2, tags=$3, style=$4, rotate=$5 WHERE id=$1`,
+			id.String(), captionV, string(tb), styleV, rotate)
 	} else {
 		// FLOAT[] cannot be bound as a parameter, so interpolate it as a literal.
 		q := fmt.Sprintf(
-			`UPDATE designs SET caption=$2, tags=$3, style=$4, embedding=%s::FLOAT[%d] WHERE id=$1`,
+			`UPDATE designs SET caption=$2, tags=$3, style=$4, rotate=$5, embedding=%s::FLOAT[%d] WHERE id=$1`,
 			floatSliceToLiteral(embedding), len(embedding))
-		_, err = s.db.ExecContext(ctx, q, id.String(), captionV, string(tb), styleV)
+		_, err = s.db.ExecContext(ctx, q, id.String(), captionV, string(tb), styleV, rotate)
 	}
 	if err != nil {
 		return fmt.Errorf("update classification: %w", err)

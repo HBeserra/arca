@@ -234,6 +234,8 @@ func (fakeClassifier) Complete(_ context.Context, _ string, _ map[string]any) (s
 	return `{"folders":[{"name":"Animals","description":"cats dogs and other animals"},{"name":"Shapes","description":"geometric shapes and patterns"}]}`, nil
 }
 func (fakeClassifier) Concurrency() int               { return 1 }
+func (fakeClassifier) SetConcurrency(_ context.Context, _ int) {}
+func (fakeClassifier) Warmup(_ context.Context) error { return nil }
 func (fakeClassifier) VisionModel() string            { return "fake" }
 func (fakeClassifier) SetVisionModel(_ string)        {}
 func (fakeClassifier) CaptionLanguage() string        { return "pt" }
@@ -265,7 +267,7 @@ func TestGenerateFoldersMechanism(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.UpdateClassification(ctx, id, cap, []string{name}, "simple", fakeEmbed(cap)); err != nil {
+		if err := store.UpdateClassification(ctx, id, cap, []string{name}, "simple", "0", fakeEmbed(cap)); err != nil {
 			t.Fatal(err)
 		}
 	}

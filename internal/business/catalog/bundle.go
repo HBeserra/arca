@@ -172,7 +172,7 @@ func (e *Engine) Import(ctx context.Context, r io.ReaderAt, size int64, progress
 			return fmt.Errorf("import: insert %s: %w", d.FileName, err)
 		}
 		if len(bd.Embedding) > 0 {
-			_ = e.store.UpdateClassification(ctx, d.ID, d.Caption, d.Tags, d.Style, bd.Embedding)
+			_ = e.store.UpdateClassification(ctx, d.ID, d.Caption, d.Tags, d.Style, d.Rotate, bd.Embedding)
 		}
 		if progress != nil {
 			progress(i+1, total)

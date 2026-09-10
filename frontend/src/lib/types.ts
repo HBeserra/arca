@@ -26,6 +26,7 @@ export interface DesignInfo {
   caption: string;
   style: string;
   tags: string[];
+  rotate: string;
   virtualFolderID: string;
 }
 
@@ -133,6 +134,19 @@ export interface CaptionLangOption {
 export interface CaptionLanguageInfo {
   current: string;
   options: CaptionLangOption[];
+}
+
+export interface WorkerModeOption {
+  id: string;
+  label: string;
+  description: string;
+  workers: number;
+}
+
+export interface WorkerModeInfo {
+  currentID: string;
+  workers: number;
+  options: WorkerModeOption[];
 }
 
 export interface ClassifyProgressPayload {

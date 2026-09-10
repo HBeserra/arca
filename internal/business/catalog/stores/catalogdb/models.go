@@ -32,6 +32,7 @@ type dbDesign struct {
 	Caption         sql.NullString
 	Tags            any
 	Style           sql.NullString
+	Rotate          sql.NullString
 	VirtualFolderID sql.NullString
 }
 
@@ -54,6 +55,7 @@ type dbDesignInsert struct {
 	Caption         any
 	Tags            string
 	Style           any
+	Rotate          any
 	VirtualFolderID any
 }
 
@@ -67,7 +69,7 @@ func scanDesign(sc rowScanner) (dbDesign, error) {
 	err := sc.Scan(
 		&m.ID, &m.Path, &m.FileName, &m.Format, &m.WidthMM, &m.HeightMM,
 		&m.StitchCount, &m.ColorChanges, &m.ColorCount, &m.Palette, &m.ThumbnailPath,
-		&m.FileSize, &m.CreatedAt, &m.Caption, &m.Tags, &m.Style, &m.VirtualFolderID,
+		&m.FileSize, &m.CreatedAt, &m.Caption, &m.Tags, &m.Style, &m.Rotate, &m.VirtualFolderID,
 	)
 	if err != nil {
 		return dbDesign{}, fmt.Errorf("scan design: %w", err)
@@ -99,12 +101,17 @@ func toDBDesign(d catalog.Design) (dbDesignInsert, error) {
 		createdAt = time.Now()
 	}
 
-	var caption, style, vfid any
+	var caption, style, rotate, vfid any
 	if d.Caption != "" {
 		caption = d.Caption
 	}
 	if d.Style != "" {
 		style = d.Style
+	}
+	if d.Rotate != "" {
+		rotate = d.Rotate
+	} else {
+		rotate = "0"
 	}
 	if d.VirtualFolderID != nil {
 		vfid = d.VirtualFolderID.String()
@@ -127,6 +134,7 @@ func toDBDesign(d catalog.Design) (dbDesignInsert, error) {
 		Caption:         caption,
 		Tags:            string(tb),
 		Style:           style,
+		Rotate:          rotate,
 		VirtualFolderID: vfid,
 	}, nil
 }
@@ -156,6 +164,11 @@ func toDesign(m dbDesign) (catalog.Design, error) {
 		vfid = &p
 	}
 
+	rotate := m.Rotate.String
+	if rotate == "" {
+		rotate = "0"
+	}
+
 	return catalog.Design{
 		ID:              id,
 		Path:            m.Path,
@@ -173,6 +186,7 @@ func toDesign(m dbDesign) (catalog.Design, error) {
 		Caption:         m.Caption.String,
 		Tags:            tags,
 		Style:           m.Style.String,
+		Rotate:          rotate,
 		VirtualFolderID: vfid,
 	}, nil
 }

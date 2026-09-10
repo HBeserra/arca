@@ -1,10 +1,10 @@
-import { Check, FolderTree, Folder, Sparkles, Loader2, X, Cpu, MemoryStick, CopyCheck, Languages, Archive, Download, Upload } from "lucide-react";
+import { Check, FolderTree, Folder, Sparkles, Loader2, X, Cpu, MemoryStick, CopyCheck, Languages, Archive, Download, Upload, Zap } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import type { FacetInfo, ListFilter, FolderInfo, VisionModelInfo, CaptionLanguageInfo } from "@/lib/types";
+import type { FacetInfo, ListFilter, FolderInfo, VisionModelInfo, CaptionLanguageInfo, WorkerModeInfo } from "@/lib/types";
 import { emptyFilter } from "@/lib/types";
 
 interface Props {
@@ -19,6 +19,8 @@ interface Props {
   onSetVisionModel: (id: string) => void;
   captionInfo: CaptionLanguageInfo | null;
   onSetCaptionLanguage: (code: string) => void;
+  workerInfo?: WorkerModeInfo | null;
+  onSetWorkerMode?: (id: string) => void;
   modelsLoaded: boolean;
   onEjectModels: () => void;
   aiBusy: boolean;
@@ -39,6 +41,8 @@ export function FilterSidebar({
   onSetVisionModel,
   captionInfo,
   onSetCaptionLanguage,
+  workerInfo,
+  onSetWorkerMode,
   modelsLoaded,
   onEjectModels,
   aiBusy,
@@ -266,6 +270,35 @@ export function FilterSidebar({
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+            )}
+
+            {workerInfo && workerInfo.options.length > 0 && (
+              <div className="space-y-1 pt-1">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <Zap className="h-3 w-3 text-amber-500" /> Desempenho / Workers
+                  </label>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-muted text-muted-foreground font-mono">
+                    {workerInfo.workers} {workerInfo.workers === 1 ? "worker" : "workers"}
+                  </span>
+                </div>
+                <Select value={workerInfo.currentID || undefined} onValueChange={onSetWorkerMode} disabled={aiBusy}>
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue placeholder="Modo de processamento" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {workerInfo.options.map((w) => (
+                      <SelectItem key={w.id} value={w.id} className="text-sm">
+                        {w.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] leading-relaxed text-muted-foreground/70">
+                  {workerInfo.options.find((w) => w.id === workerInfo.currentID)?.description ??
+                    "Define quantos arquivos de bordado são processados em paralelo pela IA."}
+                </p>
               </div>
             )}
 

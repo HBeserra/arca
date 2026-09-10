@@ -32,5 +32,7 @@ export {
     RestoreErrorEvent,
     RestoreProgressEvent,
     VisionModelInfo,
-    VisionModelOption
+    VisionModelOption,
+    WorkerModeInfo,
+    WorkerModeOption
 } from "./models.js";
